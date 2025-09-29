@@ -1,0 +1,116 @@
+services:
+  # Development overrides for faster development experience
+
+  # LLaMA FastAPI microservice - development mode
+  llama-stylist:
+    build:
+      context: ./services/llama-stylist
+      target: development
+    volumes:
+      - ./services/llama-stylist:/app
+      - /app/__pycache__ # Exclude pycache from volume mount
+    environment:
+      - PYTHONPATH=/app
+      - PORT=8000
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      interval: 15s # Faster health checks in dev
+      timeout: 5s
+      start_period: 15s
+
+  # Render Worker - development mode with volume mounts
+  render-worker:
+    build:
+      context: ./services/render-worker
+      target: development
+    volumes:
+      - ./services/render-worker:/app
+      - /app/node_modules # Exclude node_modules from volume mount
+    environment:
+      - NODE_ENV=development
+      - PORT=8001
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+      - CHROMIUM_PATH=/usr/bin/chromium
+    healthcheck:
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+
+  # MCP Gateway - development mode with hot reload
+  mcp-gateway:
+    build:
+      context: ./services/mcp-gateway
+      target: development
+    volumes:
+      - ./services/mcp-gateway:/app
+      - /app/node_modules # Exclude node_modules from volume mount
+    environment:
+      - NODE_ENV=development
+      - PORT=8080
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      - CEREBRAS_API_URL=${CEREBRAS_API_URL:-https://api.cerebras.ai/v1/chat/completions}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLAMA_URL=http://llama-stylist:8000
+      - RENDER_WORKER_URL=http://render-worker:8001
+    depends_on:
+      llama-stylist:
+        condition: service_healthy
+      render-worker:
+        condition: service_started
+    healthcheck:
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+
+  # Express orchestrator - development mode with nodemon
+  express:
+    build:
+      context: ./services/express
+      target: development
+    volumes:
+      - ./services/express:/app
+      - /app/node_modules # Exclude node_modules from volume mount
+    environment:
+      - NODE_ENV=development
+      - PORT=8000
+      - MCP_GATEWAY_URL=http://mcp-gateway:8080
+      - LLAMA_URL=http://llama-stylist:8000
+      - RENDER_WORKER_URL=http://render-worker:8001
+      - ENABLE_FALLBACK_DEMOS=${ENABLE_FALLBACK_DEMOS:-true}
+      - MAX_CACHE_SIZE=${MAX_CACHE_SIZE:-100} # Smaller cache in dev
+      - DEFAULT_RENDER_QUALITY=${DEFAULT_RENDER_QUALITY:-draft}
+      - CACHE_TTL=${CACHE_TTL:-1800000} # Shorter TTL in dev
+    depends_on:
+      mcp-gateway:
+        condition: service_healthy
+    healthcheck:
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+
+  # Frontend - development mode with hot reload and turbopack
+  frontend:
+    build:
+      context: ./services/frontend/next-app
+      target: development
+    volumes:
+      - ./services/frontend/next-app:/app
+      - /app/node_modules # Exclude node_modules from volume mount
+      - /app/.next # Exclude .next from volume mount for better performance
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - PORT=3000
+      - WATCHPACK_POLLING=true # Enable polling for file changes in Docker
+    depends_on:
+      express:
+        condition: service_healthy
+    healthcheck:
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+
+networks:
+  default:
+    driver: bridge

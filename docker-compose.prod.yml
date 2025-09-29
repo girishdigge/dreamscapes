@@ -1,0 +1,165 @@
+services:
+  # Production overrides for optimized performance
+
+  # LLaMA FastAPI microservice - production mode
+  llama-stylist:
+    build:
+      context: ./services/llama-stylist
+      target: production
+    environment:
+      - PYTHONPATH=/app
+      - PORT=8000
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Render Worker - production mode
+  render-worker:
+    build:
+      context: ./services/render-worker
+      target: production
+    environment:
+      - NODE_ENV=production
+      - PORT=8001
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+      - CHROMIUM_PATH=/usr/bin/chromium
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.1'
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # MCP Gateway - production mode
+  mcp-gateway:
+    build:
+      context: ./services/mcp-gateway
+      target: production
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      - CEREBRAS_API_URL=${CEREBRAS_API_URL:-https://api.cerebras.ai/v1/chat/completions}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLAMA_URL=http://llama-stylist:8000
+      - RENDER_WORKER_URL=http://render-worker:8001
+    depends_on:
+      llama-stylist:
+        condition: service_healthy
+      render-worker:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Express orchestrator - production mode
+  express:
+    build:
+      context: ./services/express
+      target: production
+    environment:
+      - NODE_ENV=production
+      - PORT=8000
+      - MCP_GATEWAY_URL=http://mcp-gateway:8080
+      - LLAMA_URL=http://llama-stylist:8000
+      - RENDER_WORKER_URL=http://render-worker:8001
+      - ENABLE_FALLBACK_DEMOS=${ENABLE_FALLBACK_DEMOS:-false}
+      - MAX_CACHE_SIZE=${MAX_CACHE_SIZE:-5000}
+      - DEFAULT_RENDER_QUALITY=${DEFAULT_RENDER_QUALITY:-high}
+      - CACHE_TTL=${CACHE_TTL:-7200000}
+    depends_on:
+      mcp-gateway:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend - production mode with optimized build
+  frontend:
+    build:
+      context: ./services/frontend/next-app
+      target: production
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - PORT=3000
+    depends_on:
+      express:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Redis for production caching
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 64M
+          cpus: '0.05'
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+
+networks:
+  default:
+    driver: bridge

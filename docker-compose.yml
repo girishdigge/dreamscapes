@@ -1,0 +1,171 @@
+services:
+  # LLaMA FastAPI microservice
+  llama-stylist:
+    build:
+      context: ./services/llama-stylist
+      target: development # Default to development, override in prod
+    ports:
+      - '8002:8000'
+    environment:
+      - PYTHONPATH=/app
+      - PORT=8000
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # Render Worker - Puppeteer + FFmpeg for video generation
+  render-worker:
+    build:
+      context: ./services/render-worker
+      target: development # Default to development, override in prod
+    ports:
+      - '8001:8001'
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=8001
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+      - CHROMIUM_PATH=/usr/bin/chromium
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          'require("http").get("http://localhost:8001/health", (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on("error", () => process.exit(1))',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # MCP Gateway - proxy to external APIs
+  mcp-gateway:
+    build:
+      context: ./services/mcp-gateway
+      target: development # Default to development, override in prod
+    ports:
+      - '8080:8080'
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=8080
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      - CEREBRAS_API_URL=${CEREBRAS_API_URL:-https://api.cerebras.ai/v1/chat/completions}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLAMA_URL=http://llama-stylist:8000
+      - RENDER_WORKER_URL=http://render-worker:8001
+      - REDIS_URL=redis://redis:6379
+      - CACHE_DEFAULT_TTL=${CACHE_DEFAULT_TTL:-3600}
+      - CACHE_MAX_SIZE=${CACHE_MAX_SIZE:-10000}
+      - CACHE_ENABLE_SEMANTIC_SIMILARITY=${CACHE_ENABLE_SEMANTIC_SIMILARITY:-true}
+    depends_on:
+      llama-stylist:
+        condition: service_healthy
+      render-worker:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          'require("http").get("http://localhost:8080/health", (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on("error", () => process.exit(1))',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # Express orchestrator - main API
+  express:
+    build:
+      context: ./services/express
+      target: development # Default to development, override in prod
+    ports:
+      - '8000:8000'
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=8000
+      - MCP_GATEWAY_URL=http://mcp-gateway:8080
+      - LLAMA_URL=http://llama-stylist:8000
+      - RENDER_WORKER_URL=http://render-worker:8001
+      - ENABLE_FALLBACK_DEMOS=${ENABLE_FALLBACK_DEMOS:-true}
+      - MAX_CACHE_SIZE=${MAX_CACHE_SIZE:-1000}
+      - DEFAULT_RENDER_QUALITY=${DEFAULT_RENDER_QUALITY:-draft}
+      - CACHE_TTL=${CACHE_TTL:-3600000}
+    depends_on:
+      mcp-gateway:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          'require("http").get("http://localhost:8000/health", (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on("error", () => process.exit(1))',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # Frontend - Next.js React app
+  frontend:
+    build:
+      context: ./services/frontend/next-app
+      target: development # Default to development, override in prod
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - API_URL=http://express:8000
+      - PORT=3000
+    depends_on:
+      express:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          'require("http").get("http://localhost:3000", (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on("error", () => process.exit(1))',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # Redis for enhanced caching system
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+# Named volumes
+volumes:
+  redis_data:
+
+networks:
+  default:
+    driver: bridge
