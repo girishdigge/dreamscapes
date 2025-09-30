@@ -1,0 +1,59 @@
+{
+  "providers": {
+    "cerebras": {
+      "enabled": true,
+      "priority": 10,
+      "className": "CerebrasProvider",
+      "modulePath": "./CerebrasProvider.js",
+      "limits": {
+        "requestsPerMinute": 100,
+        "tokensPerMinute": 50000,
+        "maxConcurrent": 5
+      },
+      "fallback": {
+        "enabled": true,
+        "retryAttempts": 3,
+        "backoffMultiplier": 2
+      },
+      "sdk": {
+        "model": "llama-4-maverick-17b-128e-instruct",
+        "streaming": true,
+        "maxTokens": 32768,
+        "temperature": 0.6,
+        "topP": 0.9
+      }
+    },
+    "openai": {
+      "enabled": true,
+      "priority": 8,
+      "className": "OpenAIProvider",
+      "modulePath": "./OpenAIProvider.js",
+      "limits": {
+        "requestsPerMinute": 60,
+        "tokensPerMinute": 40000,
+        "maxConcurrent": 3
+      },
+      "fallback": {
+        "enabled": true,
+        "retryAttempts": 2,
+        "backoffMultiplier": 1.5
+      }
+    },
+    "llama": {
+      "enabled": false,
+      "priority": 5,
+      "className": "LlamaProvider",
+      "modulePath": "./LlamaProvider.js",
+      "limits": {
+        "requestsPerMinute": 30,
+        "tokensPerMinute": 20000,
+        "maxConcurrent": 2
+      },
+      "fallback": {
+        "enabled": true,
+        "retryAttempts": 1,
+        "backoffMultiplier": 1
+      }
+    }
+  }
+}

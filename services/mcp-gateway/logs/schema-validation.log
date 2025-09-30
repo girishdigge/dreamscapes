@@ -1,0 +1,14 @@
+{"errorCount":12,"level":"info","message":"Schema validation completed","processingTime":11,"schema":"dreamResponse","timestamp":"2025-09-27T06:02:15.123Z","valid":false,"warningCount":0}
+{"errorCount":1,"level":"info","message":"Schema validation completed","processingTime":1,"schema":"dreamResponse","timestamp":"2025-09-27T06:02:15.179Z","valid":false,"warningCount":0}
+{"errorCount":6,"level":"info","message":"Schema validation completed","processingTime":0,"schema":"dreamResponse","timestamp":"2025-09-27T06:02:15.269Z","valid":false,"warningCount":0}
+{"errorCount":3,"level":"info","message":"Schema validation completed","processingTime":5,"schema":"dreamResponse","timestamp":"2025-09-27T06:02:15.136Z","valid":false,"warningCount":3}
+{"errorCount":3,"level":"info","message":"Schema validation completed","processingTime":4,"schema":"dreamResponse","timestamp":"2025-09-27T06:02:15.279Z","valid":false,"warningCount":2}
+{"errorCount":12,"level":"info","message":"Schema validation completed","processingTime":24,"schema":"dreamResponse","timestamp":"2025-09-27T06:05:33.547Z","valid":false,"warningCount":0}
+{"errorCount":11,"level":"info","message":"Schema validation completed","processingTime":2,"schema":"dreamResponse","timestamp":"2025-09-27T06:05:33.611Z","valid":false,"warningCount":1}
+{"errorCount":6,"level":"info","message":"Schema validation completed","processingTime":1,"schema":"dreamResponse","timestamp":"2025-09-27T06:05:33.752Z","valid":false,"warningCount":0}
+{"errorCount":3,"level":"info","message":"Schema validation completed","processingTime":3,"schema":"dreamResponse","timestamp":"2025-09-27T06:05:33.564Z","valid":false,"warningCount":2}
+{"errorCount":3,"level":"info","message":"Schema validation completed","processingTime":1,"schema":"dreamResponse","timestamp":"2025-09-27T06:05:33.755Z","valid":false,"warningCount":2}
+{"errorCount":15,"level":"info","message":"Schema validation completed","processingTime":5,"schema":"dreamResponse","timestamp":"2025-09-27T06:05:55.768Z","valid":false,"warningCount":0}
+{"errorCount":5,"level":"info","message":"Schema validation completed","processingTime":3,"schema":"dreamResponse","timestamp":"2025-09-27T06:05:55.792Z","valid":false,"warningCount":1}
+{"errorCount":14,"level":"info","message":"Schema validation completed","processingTime":0,"schema":"dreamResponse","timestamp":"2025-09-27T06:05:55.797Z","valid":false,"warningCount":0}
+{"errorCount":4,"level":"info","message":"Schema validation completed","processingTime":1,"schema":"dreamResponse","timestamp":"2025-09-27T06:05:55.803Z","valid":false,"warningCount":2}
