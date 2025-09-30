@@ -1,20 +1,32 @@
-# Use an official Node runtime as the base image
-FROM node:22-alpine
-
-# Set the working directory in the container
+# Multi-stage build for better caching
+FROM node:24.8.0-alpine3.21 AS base
 WORKDIR /app
 
-# Copy package.json and package-lock.json (if available)
+# Install dependencies in a separate layer for better caching
+FROM base AS deps
 COPY package*.json ./
+RUN npm ci --only=production && npm cache clean --force
 
-# Install dependencies
-RUN npm ci --only=production
+# Development dependencies
+FROM base AS dev-deps
+COPY package*.json ./
+RUN npm ci && npm cache clean --force
 
-# Copy the rest of the application code
+# Development stage
+FROM base AS development
+COPY --from=dev-deps /app/node_modules ./node_modules
 COPY . .
-
-# Expose the port the app runs on
 EXPOSE 8000
+ENV NODE_ENV=development
+CMD ["npm", "run", "dev"]
 
-# Define the command to run the application
-CMD ["node", "server.js"]
+# Production stage
+FROM base AS production
+ENV NODE_ENV=production
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+EXPOSE 8000
+CMD ["npm", "start"]
+
+# Default to development
+FROM development
