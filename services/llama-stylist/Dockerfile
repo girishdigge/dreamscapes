@@ -1,20 +1,37 @@
-# Use an official Python runtime as the base image
-FROM python:3.11-slim
+# Multi-stage build for Python service
+FROM python:3.13-slim-bookworm AS base
 
-# Set the working directory in the container
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PATH="/root/.local/bin:$PATH"
 WORKDIR /app
 
-# Copy requirements.txt to install dependencies
+# System dependencies stage - cached separately
+FROM base AS system-deps
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends build-essential ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/*
+
+# Dependencies stage
+FROM system-deps AS deps
 COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the rest of the application code
+# Development stage
+FROM system-deps AS development
+COPY --from=deps /root/.local /root/.local
 COPY . .
-
-# Expose the port the app runs on
 EXPOSE 8000
+ENV PYTHONPATH=/app
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
-# Define the command to run the application
+# Production stage
+FROM base AS production
+COPY --from=deps /root/.local /root/.local
+COPY . .
+EXPOSE 8000
+ENV PYTHONPATH=/app
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# Default to development
+FROM development
