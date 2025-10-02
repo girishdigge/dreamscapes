@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Dreamscapes Render Template</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        height: 100%;
+        overflow: hidden;
+      }
+      #renderCanvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .debug {
+        position: absolute;
+        left: 8px;
+        top: 8px;
+        color: rgba(255, 255, 255, 0.9);
+        font-family: monospace;
+        font-size: 12px;
+        z-index: 100;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="renderCanvas"></canvas>
+    <div class="debug" id="debugInfo"></div>
+
+    <script>
+      // Very small deterministic renderer to visualize the dream JSON.
+      // Exposes:
+      //  - window.initWithDream(dream, width, height)
+      //  - window.seek(t)   // render to time t (seconds)
+      // Canvas is #renderCanvas
+
+      (function () {
+        const canvas = document.getElementById('renderCanvas');
+        const ctx = canvas.getContext('2d');
+        let width = window.innerWidth;
+        let height = window.innerHeight;
+        let dream = {
+          style: 'ethereal',
+          entities: [],
+          structures: [],
+          cinematography: { durationSec: 30 },
+        };
+
+        function resize(w, h) {
+          width = w || window.innerWidth;
+          height = h || window.innerHeight;
+          canvas.width = width;
+          canvas.height = height;
+        }
+
+        window.resizeCanvas = resize;
+
+        function clear() {
+          ctx.clearRect(0, 0, width, height);
+        }
+
+        function styleToBG(styleName) {
+          switch ((styleName || '').toLowerCase()) {
+            case 'cyberpunk':
+              return ['#001133', '#220066', '#004466'];
+            case 'surreal':
+              return ['#2d1a4a', '#401a7a', '#571a9a'];
+            case 'fantasy':
+              return ['#ffb347', '#ffd27a', '#ffeead'];
+            case 'nightmare':
+              return ['#0a0a0a', '#1a0d1a', '#2a0a1a'];
+            default:
+              return ['#a6d8ff', '#9aa8ff', '#dcecff'];
+          }
+        }
+
+        function drawBackground(t) {
+          const cols = styleToBG(dream.style);
+          // gradient shifting with time
+          const g = ctx.createLinearGradient(0, 0, width, height);
+          const shift = (Math.sin(t * 0.2) + 1) / 2;
+          g.addColorStop(0, cols[0]);
+          g.addColorStop(0.5, cols[1]);
+          g.addColorStop(1, cols[2]);
+          ctx.fillStyle = g;
+          ctx.fillRect(0, 0, width, height);
+        }
+
+        function drawStructures(t) {
+          const s = dream.structures || [];
+          s.forEach((st, idx) => {
+            const posx =
+              width / 2 +
+              (idx - s.length / 2) * 120 +
+              Math.sin((t + idx) * 0.7) * 20;
+            const posy = height / 2 + Math.cos((t + idx) * 0.5) * 10 - 30;
+            const scale = st.scale || 1.0;
+            const w = 200 * scale;
+            const h = 100 * scale;
+            ctx.save();
+            ctx.globalAlpha = 0.85;
+            ctx.fillStyle = 'rgba(255,255,255,0.06)';
+            roundRect(ctx, posx - w / 2, posy - h / 2, w, h, 12);
+            ctx.fill();
+            ctx.restore();
+          });
+        }
+
+        function drawEntities(t) {
+          const ents = dream.entities || [];
+          ents.forEach((e, idx) => {
+            const count = Math.max(1, e.count || 10);
+            const speed = (e.params && e.params.speed) || 1.0;
+            const glow = (e.params && e.params.glow) || 0.6;
+            const color = (e.params && e.params.color) || '#ffffff';
+
+            for (let i = 0; i < Math.min(count, 60); i++) {
+              const angle = (i / Math.max(1, count)) * Math.PI * 2;
+              const radius = 80 + (i % 10) * 6 + idx * 10;
+              const px = Math.floor(
+                width / 2 + Math.cos(angle + t * 0.5 * speed + idx) * radius
+              );
+              const py = Math.floor(
+                height / 2 +
+                  Math.sin(angle + t * 0.4 * speed + idx) * radius * 0.6
+              );
+              const size = Math.max(2, ((i % 6) + 1) * 0.8 * (1 + glow));
+              // glow effect
+              ctx.beginPath();
+              ctx.fillStyle = hexToRGBA(color, 0.06 * glow);
+              ctx.arc(px, py, size * 4, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.beginPath();
+              ctx.fillStyle = color;
+              ctx.arc(px, py, size, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          });
+        }
+
+        function drawHUD(t) {
+          const dbg = document.getElementById('debugInfo');
+          if (dbg) {
+            dbg.textContent = `style: ${dream.style} | time: ${t.toFixed(
+              2
+            )}s | entities:${(dream.entities || []).length} structures:${
+              (dream.structures || []).length
+            }`;
+          }
+        }
+
+        // helpers
+        function roundRect(ctx, x, y, w, h, r) {
+          ctx.beginPath();
+          ctx.moveTo(x + r, y);
+          ctx.arcTo(x + w, y, x + w, y + h, r);
+          ctx.arcTo(x + w, y + h, x, y + h, r);
+          ctx.arcTo(x, y + h, x, y, r);
+          ctx.arcTo(x, y, x + w, y, r);
+          ctx.closePath();
+        }
+
+        function hexToRGBA(hex, a) {
+          if (!hex) return `rgba(255,255,255,${a})`;
+          const c = hex.replace('#', '');
+          const r = parseInt(c.substring(0, 2), 16);
+          const g = parseInt(c.substring(2, 4), 16);
+          const b = parseInt(c.substring(4, 6), 16);
+          return `rgba(${r},${g},${b},${a})`;
+        }
+
+        // Dangerous but works for deterministic seek rendering
+        function seek(timeSec) {
+          clear();
+          drawBackground(timeSec);
+          drawStructures(timeSec);
+          drawEntities(timeSec);
+          drawHUD(timeSec);
+        }
+
+        function initWithDream(d, w, h) {
+          dream = d || dream;
+          resize(w || window.innerWidth, h || window.innerHeight);
+          seek(0);
+        }
+
+        window.initWithDream = initWithDream;
+        window.seek = seek;
+        window._simpleSeek = seek;
+
+        // initialize size
+        resize(window.innerWidth, window.innerHeight);
+        seek(0);
+      })();
+    </script>
+  </body>
+</html>

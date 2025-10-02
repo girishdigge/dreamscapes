@@ -107,7 +107,7 @@ class MetricsCollector extends EventEmitter {
       statusCode: metric.statusCode,
       error: metric.error,
       errorType: metric.errorType,
-      tokenUsage: metric.tokenUsage || {},
+      tokenUsage: metric.tokenUsage || metric.tokens || {},
       model: metric.model,
       endpoint: metric.endpoint,
       requestSize: metric.requestSize,
@@ -469,9 +469,19 @@ class MetricsCollector extends EventEmitter {
    */
   calculatePercentile(sortedArray, percentile) {
     if (sortedArray.length === 0) return 0;
+    if (sortedArray.length === 1) return sortedArray[0];
 
-    const index = Math.ceil(sortedArray.length * percentile) - 1;
-    return sortedArray[Math.max(0, Math.min(index, sortedArray.length - 1))];
+    // Use linear interpolation for more accurate percentiles
+    const index = (sortedArray.length - 1) * percentile;
+    const lower = Math.floor(index);
+    const upper = Math.ceil(index);
+
+    if (lower === upper) {
+      return sortedArray[lower];
+    }
+
+    const weight = index - lower;
+    return sortedArray[lower] * (1 - weight) + sortedArray[upper] * weight;
   }
 
   /**
@@ -885,17 +895,331 @@ class MetricsCollector extends EventEmitter {
   }
 
   /**
-   * Cleanup resources
+   * Get provider-specific metrics data
+   * @param {string} providerName - Provider name
+   * @returns {Object} Provider metrics
    */
-  destroy() {
+  getProviderMetrics(providerName) {
+    if (!this.rawMetrics.has(providerName)) {
+      throw new Error(`Provider not found: ${providerName}`);
+    }
+
+    const rawMetrics = this.rawMetrics.get(providerName);
+    const requestMetrics = rawMetrics.filter((m) => m.type === 'request');
+
+    if (requestMetrics.length === 0) {
+      return {
+        totalRequests: 0,
+        successfulRequests: 0,
+        failedRequests: 0,
+        successRate: 0,
+        errorRate: 0,
+        averageResponseTime: 0,
+        totalTokens: 0,
+      };
+    }
+
+    const successfulRequests = requestMetrics.filter((m) => m.success);
+    const failedRequests = requestMetrics.filter((m) => !m.success);
+
+    const totalResponseTime = requestMetrics
+      .filter((m) => typeof m.responseTime === 'number')
+      .reduce((sum, m) => sum + m.responseTime, 0);
+
+    const totalTokens = successfulRequests.reduce((sum, m) => {
+      const tokens = m.tokenUsage || m.tokens || {};
+      return sum + (tokens.total || (tokens.input || 0) + (tokens.output || 0));
+    }, 0);
+
+    const totalRequests = requestMetrics.length;
+    const successCount = successfulRequests.length;
+    const failureCount = failedRequests.length;
+
+    return {
+      totalRequests,
+      successfulRequests: successCount,
+      failedRequests: failureCount,
+      successRate: totalRequests > 0 ? successCount / totalRequests : 0,
+      errorRate: totalRequests > 0 ? failureCount / totalRequests : 0,
+      averageResponseTime:
+        totalRequests > 0 ? totalResponseTime / totalRequests : 0,
+      totalTokens,
+    };
+  }
+
+  /**
+   * Get response time percentiles for a provider
+   * @param {string} providerName - Provider name
+   * @returns {Object} Response time percentiles
+   */
+  getResponseTimePercentiles(providerName) {
+    const rawMetrics = this.rawMetrics.get(providerName);
+    if (!rawMetrics) {
+      throw new Error(`Provider not found: ${providerName}`);
+    }
+
+    const requestMetrics = rawMetrics.filter(
+      (m) => m.type === 'request' && typeof m.responseTime === 'number'
+    );
+
+    if (requestMetrics.length === 0) {
+      return {
+        p50: 0,
+        p90: 0,
+        p95: 0,
+        p99: 0,
+      };
+    }
+
+    const responseTimes = requestMetrics
+      .map((m) => m.responseTime)
+      .sort((a, b) => a - b);
+
+    return {
+      p50: this.calculatePercentile(responseTimes, 0.5),
+      p90: this.calculatePercentile(responseTimes, 0.9),
+      p95: this.calculatePercentile(responseTimes, 0.95),
+      p99: this.calculatePercentile(responseTimes, 0.99),
+    };
+  }
+
+  /**
+   * Get time series metrics for a provider
+   * @param {string} providerName - Provider name
+   * @param {Object} options - Query options
+   * @returns {Array} Time series data
+   */
+  getTimeSeriesMetrics(providerName, options = {}) {
+    const { startTime, endTime, interval = 900000 } = options; // 15 minutes default
+    const aggregatedData = this.aggregatedMetrics.get(providerName);
+
+    if (!aggregatedData) {
+      throw new Error(`Provider not found: ${providerName}`);
+    }
+
+    const timeSeriesData = [];
+    let currentTime = startTime;
+
+    // Generate exactly the expected number of buckets
+    while (currentTime < endTime) {
+      const bucketEnd = currentTime + interval;
+      const isLastBucket = bucketEnd >= endTime;
+
+      // Find metrics in this time bucket using raw metrics
+      const rawMetrics = this.rawMetrics.get(providerName) || [];
+      const bucketMetrics = rawMetrics.filter((m) => {
+        if (isLastBucket) {
+          return m.timestamp >= currentTime && m.timestamp <= endTime;
+        } else {
+          return m.timestamp >= currentTime && m.timestamp < bucketEnd;
+        }
+      });
+
+      const requestMetrics = bucketMetrics.filter((m) => m.type === 'request');
+
+      timeSeriesData.push({
+        timestamp: currentTime,
+        requests: requestMetrics.length,
+        successRate:
+          requestMetrics.length > 0
+            ? requestMetrics.filter((m) => m.success).length /
+              requestMetrics.length
+            : 0,
+        avgResponseTime:
+          requestMetrics.length > 0
+            ? requestMetrics.reduce(
+                (sum, m) => sum + (m.responseTime || 0),
+                0
+              ) / requestMetrics.length
+            : 0,
+        errors: requestMetrics.filter((m) => !m.success).length,
+      });
+
+      currentTime += interval;
+    }
+
+    return timeSeriesData;
+  }
+
+  /**
+   * Shutdown the metrics collector (alias for stopAggregation)
+   */
+  shutdown() {
     this.stopAggregation();
+    console.log('MetricsCollector shutdown completed');
+  }
+
+  /**
+   * Get aggregated metrics across all providers
+   * @returns {Object} Aggregated metrics
+   */
+  getAggregatedMetrics() {
+    const providers = Array.from(this.rawMetrics.keys());
+
+    if (providers.length === 0) {
+      return {
+        totalRequests: 0,
+        successfulRequests: 0,
+        failedRequests: 0,
+        successRate: 0,
+        errorRate: 0,
+        averageResponseTime: 0,
+        totalTokens: 0,
+        providers: [],
+      };
+    }
+
+    let totalRequests = 0;
+    let successfulRequests = 0;
+    let failedRequests = 0;
+    let totalResponseTime = 0;
+    let totalTokens = 0;
+    let totalRequestsWithResponseTime = 0;
+
+    const providerMetrics = [];
+
+    for (const providerName of providers) {
+      const metrics = this.getProviderMetrics(providerName);
+      providerMetrics.push({
+        provider: providerName,
+        ...metrics,
+      });
+
+      totalRequests += metrics.totalRequests;
+      successfulRequests += metrics.successfulRequests;
+      failedRequests += metrics.failedRequests;
+      totalTokens += metrics.totalTokens;
+
+      if (metrics.totalRequests > 0) {
+        totalResponseTime +=
+          metrics.averageResponseTime * metrics.totalRequests;
+        totalRequestsWithResponseTime += metrics.totalRequests;
+      }
+    }
+
+    return {
+      totalRequests,
+      successfulRequests,
+      failedRequests,
+      successRate: totalRequests > 0 ? successfulRequests / totalRequests : 0,
+      errorRate: totalRequests > 0 ? failedRequests / totalRequests : 0,
+      averageResponseTime:
+        totalRequestsWithResponseTime > 0
+          ? totalResponseTime / totalRequestsWithResponseTime
+          : 0,
+      totalTokens,
+      providers: providerMetrics,
+    };
+  }
+
+  /**
+   * Get response time percentiles for a provider
+   * @param {string} providerName - Provider name
+   * @returns {Object} Response time percentiles
+   */
+  getResponseTimePercentiles(providerName) {
+    const rawMetrics = this.rawMetrics.get(providerName);
+    if (!rawMetrics) {
+      throw new Error(`Provider not found: ${providerName}`);
+    }
+
+    const requestMetrics = rawMetrics.filter(
+      (m) => m.type === 'request' && typeof m.responseTime === 'number'
+    );
+
+    if (requestMetrics.length === 0) {
+      return {
+        p50: 0,
+        p90: 0,
+        p95: 0,
+        p99: 0,
+      };
+    }
+
+    const responseTimes = requestMetrics
+      .map((m) => m.responseTime)
+      .sort((a, b) => a - b);
+
+    return {
+      p50: this.calculatePercentile(responseTimes, 0.5),
+      p90: this.calculatePercentile(responseTimes, 0.9),
+      p95: this.calculatePercentile(responseTimes, 0.95),
+      p99: this.calculatePercentile(responseTimes, 0.99),
+    };
+  }
+
+  /**
+   * Get aggregated metrics across all providers
+   * @returns {Object} Aggregated metrics
+   */
+  getAggregatedMetrics() {
+    const providers = Array.from(this.rawMetrics.keys());
+    let totalRequests = 0;
+    let successfulRequests = 0;
+    let failedRequests = 0;
+    let totalResponseTime = 0;
+    let totalTokens = 0;
+    let requestCount = 0;
+
+    const providerMetrics = [];
+
+    for (const providerName of providers) {
+      try {
+        const metrics = this.getProviderMetrics(providerName);
+        providerMetrics.push({
+          provider: providerName,
+          ...metrics,
+        });
+
+        totalRequests += metrics.totalRequests;
+        successfulRequests += metrics.successfulRequests;
+        failedRequests += metrics.failedRequests;
+        totalTokens += metrics.totalTokens;
+
+        if (metrics.totalRequests > 0) {
+          totalResponseTime +=
+            metrics.averageResponseTime * metrics.totalRequests;
+          requestCount += metrics.totalRequests;
+        }
+      } catch (error) {
+        console.warn(
+          `Failed to get metrics for ${providerName}:`,
+          error.message
+        );
+      }
+    }
+
+    return {
+      totalRequests,
+      successfulRequests,
+      failedRequests,
+      successRate: totalRequests > 0 ? successfulRequests / totalRequests : 0,
+      errorRate: totalRequests > 0 ? failedRequests / totalRequests : 0,
+      averageResponseTime:
+        requestCount > 0 ? totalResponseTime / requestCount : 0,
+      totalTokens,
+      providers: providerMetrics,
+    };
+  }
+
+  /**
+   * Reset all metrics data
+   */
+  reset() {
     this.rawMetrics.clear();
     this.aggregatedMetrics.clear();
     this.realtimeMetrics.clear();
     this.performanceBaselines.clear();
     this.anomalies.clear();
-    this.removeAllListeners();
-    console.log('MetricsCollector destroyed');
+    console.log('MetricsCollector reset completed');
+  }
+
+  /**
+   * Shutdown the metrics collector (alias for stopAggregation)
+   */
+  shutdown() {
+    this.stopAggregation();
+    console.log('MetricsCollector shutdown completed');
   }
 }
 

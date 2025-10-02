@@ -538,6 +538,18 @@ class EnhancedLoadBalancer extends EventEmitter {
   }
 
   /**
+   * Stop adaptive strategy evaluation
+   * @private
+   */
+  stopAdaptiveEvaluation() {
+    if (this.adaptiveInterval) {
+      clearInterval(this.adaptiveInterval);
+      this.adaptiveInterval = null;
+      console.log('Adaptive strategy evaluation stopped');
+    }
+  }
+
+  /**
    * Evaluate current strategy performance and adapt if needed
    * @private
    */

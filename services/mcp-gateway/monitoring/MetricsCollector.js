@@ -806,6 +806,66 @@ class MetricsCollector extends EventEmitter {
   }
 
   /**
+   * Get provider-specific metrics data
+   * @param {string} providerName - Provider name
+   * @returns {Object} Provider metrics
+   */
+  getProviderMetrics(providerName) {
+    if (!this.rawMetrics.has(providerName)) {
+      throw new Error(`Provider not found: ${providerName}`);
+    }
+
+    const rawMetrics = this.rawMetrics.get(providerName);
+    const requestMetrics = rawMetrics.filter((m) => m.type === 'request');
+
+    if (requestMetrics.length === 0) {
+      return {
+        totalRequests: 0,
+        successfulRequests: 0,
+        failedRequests: 0,
+        successRate: 0,
+        errorRate: 0,
+        averageResponseTime: 0,
+        totalTokens: 0,
+      };
+    }
+
+    const successfulRequests = requestMetrics.filter((m) => m.success);
+    const failedRequests = requestMetrics.filter((m) => !m.success);
+
+    const totalResponseTime = requestMetrics
+      .filter((m) => typeof m.responseTime === 'number')
+      .reduce((sum, m) => sum + m.responseTime, 0);
+
+    const totalTokens = successfulRequests.reduce((sum, m) => {
+      const tokens = m.tokens || {};
+      return sum + (tokens.total || (tokens.input || 0) + (tokens.output || 0));
+    }, 0);
+
+    const totalRequests = requestMetrics.length;
+    const successCount = successfulRequests.length;
+    const failureCount = failedRequests.length;
+
+    return {
+      totalRequests,
+      successfulRequests: successCount,
+      failedRequests: failureCount,
+      successRate: totalRequests > 0 ? successCount / totalRequests : 0,
+      errorRate: totalRequests > 0 ? failureCount / totalRequests : 0,
+      averageResponseTime:
+        totalRequests > 0 ? totalResponseTime / totalRequests : 0,
+      totalTokens,
+    };
+  }
+
+  /**
+   * Shutdown the metrics collector (alias for destroy)
+   */
+  shutdown() {
+    this.destroy();
+  }
+
+  /**
    * Cleanup resources
    */
   destroy() {

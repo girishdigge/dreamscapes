@@ -196,6 +196,7 @@ class AlertingSystem extends EventEmitter {
     // Check for escalation
     await this.checkEscalation(alert, alertId);
 
+    this.emit('alert', alert);
     this.emit('alertProcessed', { alert, alertId });
   }
 
@@ -898,6 +899,207 @@ class AlertingSystem extends EventEmitter {
 
     const [, amount, unit] = match;
     return parseInt(amount) * (units[unit] || 86400000);
+  }
+
+  /**
+   * Stop the alerting system (alias for stopReporting)
+   */
+  async stop() {
+    this.stopReporting();
+  }
+
+  /**
+   * Check error rate alerts for a provider
+   * @param {Object} metrics - Provider metrics
+   * @param {string} provider - Provider name
+   */
+  async checkErrorRateAlerts(metrics, provider) {
+    if (!metrics || typeof metrics.errorRate !== 'number') {
+      return;
+    }
+
+    if (metrics.errorRate > this.config.alertThresholds.errorRate) {
+      await this.processAlert({
+        type: 'error_rate',
+        severity: this.calculateAlertSeverity('error_rate', {
+          errorRate: metrics.errorRate,
+        }),
+        provider,
+        message: `High error rate detected: ${(metrics.errorRate * 100).toFixed(
+          1
+        )}%`,
+        data: {
+          errorRate: metrics.errorRate,
+          threshold: this.config.alertThresholds.errorRate,
+          totalRequests: metrics.totalRequests,
+          failedRequests: metrics.failedRequests,
+        },
+      });
+    }
+  }
+
+  /**
+   * Check response time alerts for a provider
+   * @param {Object} metrics - Provider metrics
+   * @param {string} provider - Provider name
+   */
+  async checkResponseTimeAlerts(metrics, provider) {
+    if (!metrics || typeof metrics.averageResponseTime !== 'number') {
+      console.log(
+        'checkResponseTimeAlerts: Invalid metrics or averageResponseTime',
+        { metrics, provider }
+      );
+      return;
+    }
+
+    console.log('checkResponseTimeAlerts: Checking', {
+      provider,
+      averageResponseTime: metrics.averageResponseTime,
+      threshold: this.config.alertThresholds.responseTime,
+      shouldAlert:
+        metrics.averageResponseTime > this.config.alertThresholds.responseTime,
+    });
+
+    if (
+      metrics.averageResponseTime > this.config.alertThresholds.responseTime
+    ) {
+      await this.processAlert({
+        type: 'response_time',
+        severity: this.calculateAlertSeverity('response_time', {
+          responseTime: metrics.averageResponseTime,
+        }),
+        provider,
+        message: `High response time detected: ${metrics.averageResponseTime.toFixed(
+          0
+        )}ms`,
+        data: {
+          averageResponseTime: metrics.averageResponseTime,
+          threshold: this.config.alertThresholds.responseTime,
+          totalRequests: metrics.totalRequests,
+        },
+      });
+    }
+  }
+
+  /**
+   * Check consecutive failure alerts for a provider
+   * @param {string} provider - Provider name
+   */
+  async checkConsecutiveFailureAlerts(provider) {
+    // Get recent alerts for this provider to check for consecutive failures
+    const recentAlerts = this.getRecentAlerts(provider, 1); // Last hour
+    const failureAlerts = recentAlerts.filter(
+      (alert) =>
+        alert.type === 'operation_failure' ||
+        alert.type === 'health_check_failed'
+    );
+
+    if (
+      failureAlerts.length >= this.config.alertThresholds.consecutiveFailures
+    ) {
+      await this.processAlert({
+        type: 'consecutive_failures',
+        severity: 'high',
+        provider,
+        message: `${failureAlerts.length} consecutive failures detected`,
+        data: {
+          consecutiveFailures: failureAlerts.length,
+          threshold: this.config.alertThresholds.consecutiveFailures,
+          recentFailures: failureAlerts.slice(-5), // Last 5 failures
+        },
+      });
+    }
+  }
+
+  /**
+   * Calculate alert severity based on type and data
+   * @param {string} alertType - Type of alert
+   * @param {Object} data - Alert data
+   * @returns {string} Severity level
+   */
+  calculateAlertSeverity(alertType, data) {
+    switch (alertType) {
+      case 'error_rate':
+        if (data.errorRate > 0.5) return 'critical';
+        if (data.errorRate > 0.25) return 'high';
+        if (data.errorRate > 0.1) return 'medium';
+        return 'low';
+
+      case 'response_time':
+        if (data.responseTime > 30000) return 'critical'; // 30 seconds
+        if (data.responseTime > 15000) return 'high'; // 15 seconds
+        if (data.responseTime > 10000) return 'medium'; // 10 seconds
+        return 'low';
+
+      case 'consecutive_failures':
+        if (data.consecutiveFailures > 10) return 'critical';
+        if (data.consecutiveFailures > 5) return 'high';
+        return 'medium';
+
+      default:
+        return 'medium';
+    }
+  }
+
+  /**
+   * Get active alerts with optional filtering
+   * @param {Object} filters - Filter options
+   * @returns {Array} Active alerts
+   */
+  getActiveAlerts(filters = {}) {
+    let alerts = Array.from(this.activeAlerts.values());
+
+    if (filters.provider) {
+      alerts = alerts.filter((alert) => alert.provider === filters.provider);
+    }
+
+    if (filters.severity) {
+      alerts = alerts.filter((alert) => alert.severity === filters.severity);
+    }
+
+    if (filters.status) {
+      alerts = alerts.filter((alert) => alert.status === filters.status);
+    }
+
+    return alerts.sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  /**
+   * Get alert history with optional filtering
+   * @param {Object} options - Query options
+   * @returns {Array} Alert history
+   */
+  getAlertHistory(options = {}) {
+    const timeRange = options.timeRange || 86400000; // 24 hours default
+    const cutoffTime = Date.now() - timeRange;
+
+    let allAlerts = [];
+
+    if (options.provider) {
+      const providerAlerts = this.alertHistory.get(options.provider) || [];
+      allAlerts = providerAlerts.filter(
+        (alert) => alert.timestamp.getTime() > cutoffTime
+      );
+    } else {
+      for (const alerts of this.alertHistory.values()) {
+        const filteredAlerts = alerts.filter(
+          (alert) => alert.timestamp.getTime() > cutoffTime
+        );
+        allAlerts = allAlerts.concat(filteredAlerts);
+      }
+    }
+
+    if (options.severity) {
+      allAlerts = allAlerts.filter(
+        (alert) => alert.severity === options.severity
+      );
+    }
+
+    if (options.status) {
+      allAlerts = allAlerts.filter((alert) => alert.status === options.status);
+    }
+
+    return allAlerts.sort((a, b) => b.timestamp - a.timestamp);
   }
 
   /**

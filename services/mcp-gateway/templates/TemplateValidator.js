@@ -21,14 +21,13 @@ class TemplateValidator {
         max_length: 10000,
         required_sections: ['INSTRUCTIONS', 'OUTPUT'],
         forbidden_patterns: [
-          /\{[^}]*\{/g, // Nested braces
-          /\}[^{]*\}/g, // Unmatched braces
+          // Remove JSON-breaking patterns since templates may contain JSON examples
         ],
       },
       variable_validation: {
         naming_pattern: /^[a-z_][a-z0-9_]*$/,
         max_variables: 20,
-        reserved_names: ['input', 'output', 'system', 'user'],
+        reserved_names: ['system', 'user'],
       },
     };
 
@@ -99,26 +98,47 @@ class TemplateValidator {
     rules.required_fields.forEach((field) => {
       if (!template.hasOwnProperty(field)) {
         errors.push(`Missing required field: ${field}`);
-      } else if (typeof template[field] !== rules.field_types[field]) {
-        errors.push(
-          `Invalid type for field ${field}: expected ${
-            rules.field_types[field]
-          }, got ${typeof template[field]}`
-        );
+      } else {
+        const expectedType = rules.field_types[field];
+        const actualValue = template[field];
+        let isValidType = false;
+
+        if (expectedType === 'array') {
+          isValidType = Array.isArray(actualValue);
+        } else {
+          isValidType = typeof actualValue === expectedType;
+        }
+
+        if (!isValidType) {
+          errors.push(
+            `Invalid type for field ${field}: expected ${expectedType}, got ${
+              Array.isArray(actualValue) ? 'array' : typeof actualValue
+            }`
+          );
+        }
       }
     });
 
     // Check field types for optional fields
     rules.optional_fields.forEach((field) => {
-      if (
-        template.hasOwnProperty(field) &&
-        typeof template[field] !== rules.field_types[field]
-      ) {
-        warnings.push(
-          `Invalid type for optional field ${field}: expected ${
-            rules.field_types[field]
-          }, got ${typeof template[field]}`
-        );
+      if (template.hasOwnProperty(field)) {
+        const expectedType = rules.field_types[field];
+        const actualValue = template[field];
+        let isValidType = false;
+
+        if (expectedType === 'array') {
+          isValidType = Array.isArray(actualValue);
+        } else {
+          isValidType = typeof actualValue === expectedType;
+        }
+
+        if (!isValidType) {
+          warnings.push(
+            `Invalid type for optional field ${field}: expected ${expectedType}, got ${
+              Array.isArray(actualValue) ? 'array' : typeof actualValue
+            }`
+          );
+        }
       }
     });
 
@@ -160,8 +180,8 @@ class TemplateValidator {
       }
     });
 
-    // Check variable placeholders
-    const placeholders = content.match(/\{[^}]+\}/g) || [];
+    // Check variable placeholders (only simple {variable} patterns, not JSON)
+    const placeholders = content.match(/\{[a-z_][a-z0-9_]*\}/gi) || [];
     const variables = template.variables || [];
 
     placeholders.forEach((placeholder) => {

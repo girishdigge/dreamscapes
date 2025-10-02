@@ -807,8 +807,61 @@ Generate a cohesive video sequence that:
     return 'Sharp focus on main subject';
   }
   generateTechnicalNotes(shotTemplate, style) {
-    return 'Standard technical execution';
+    return `Technical specifications for ${shotTemplate.name} with ${style.name} style`;
   }
+
+  // Methods expected by tests
+  buildCinematographyPrompt(sceneData) {
+    const cinematographyStyle = sceneData.style || 'dreamlike';
+    const style =
+      this.cinematographyStyles[cinematographyStyle] ||
+      this.cinematographyStyles.dreamlike;
+
+    let prompt = `CINEMATOGRAPHY INSTRUCTIONS for ${
+      sceneData.title || 'Scene'
+    }:\n\n`;
+
+    if (sceneData.scenes) {
+      sceneData.scenes.forEach((scene, index) => {
+        prompt += `Scene ${index + 1}: ${scene.description}\n`;
+        if (scene.mood) prompt += `Mood: ${scene.mood}\n`;
+        if (scene.lighting) prompt += `Lighting: ${scene.lighting}\n`;
+      });
+    }
+
+    prompt += `\nCinematography Style: ${style.name}\n`;
+    prompt += `Camera Techniques: ${style.camera_techniques.join(', ')}\n`;
+    prompt += `Lighting Setup: ${style.lighting_setup}\n`;
+    prompt += `Color Grading: ${style.color_grading}\n`;
+    prompt += `Frame Rate: ${style.frame_rate}\n`;
+    prompt += `Aspect Ratio: ${style.aspect_ratio}\n`;
+
+    return prompt;
+  }
+
+  buildTransitionPrompt(scene1, scene2) {
+    let prompt = `TRANSITION INSTRUCTIONS between scenes:\n\n`;
+
+    prompt += `From: ${scene1.title || scene1.description || 'Scene 1'}\n`;
+    prompt += `To: ${scene2.title || scene2.description || 'Scene 2'}\n\n`;
+
+    // Determine appropriate transition type
+    const transitionType = this.selectTransitionType(
+      scene1,
+      scene2,
+      this.cinematographyStyles.dreamlike
+    );
+    const transition = this.transitionTypes[transitionType];
+
+    prompt += `Recommended Transition: ${transition.name}\n`;
+    prompt += `Duration: ${transition.duration}\n`;
+    prompt += `Style: ${transition.style}\n`;
+    prompt += `Description: ${transition.description}\n`;
+    prompt += `Best for: ${transition.best_for}\n`;
+
+    return prompt;
+  }
+
   optimizeShotSequence(sequence, style) {
     return sequence;
   }

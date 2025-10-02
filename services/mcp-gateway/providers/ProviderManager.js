@@ -4,6 +4,8 @@
 const EventEmitter = require('events');
 const { EnhancedLoadBalancer } = require('./ProviderSelector');
 const ProviderPreferenceManager = require('./ProviderPreferenceManager');
+const IntelligentRetrySystem = require('../utils/IntelligentRetrySystem');
+const EnhancedCircuitBreaker = require('./EnhancedCircuitBreaker');
 
 /**
  * Provider Manager - Centralized management of all AI providers
@@ -17,6 +19,8 @@ class ProviderManager extends EventEmitter {
     this.providerConfigs = new Map(); // provider_name -> config
     this.healthStatus = new Map(); // provider_name -> health_data
     this.metrics = new Map(); // provider_name -> metrics_data
+    this.failureHistory = new Map(); // provider_name -> failure_history
+    this.lastUsedProvider = null; // last used provider for context preservation
 
     // Enhanced load balancing and preference management
     this.loadBalancer = new EnhancedLoadBalancer({
@@ -36,6 +40,21 @@ class ProviderManager extends EventEmitter {
     this.healthMonitor = null;
     this.metricsCollector = null;
     this.alertingSystem = null;
+
+    // Initialize Intelligent Retry System
+    this.retrySystem = new IntelligentRetrySystem({
+      baseDelay: config.baseDelay || 1000,
+      maxDelay: config.maxDelay || 30000,
+      backoffMultiplier: config.backoffMultiplier || 2,
+      maxRetryAttempts: config.maxRetryAttempts || 3,
+      maxProviderRetries: config.maxProviderRetries || 2,
+      enableProviderSwitching: config.enableProviderSwitching !== false,
+      preserveContext: config.preserveContext !== false,
+      enableCircuitBreaker: config.enableCircuitBreaker !== false,
+      circuitBreakerThreshold: config.circuitBreakerThreshold || 5,
+      circuitBreakerTimeout: config.circuitBreakerTimeout || 60000,
+      ...config.retrySystem,
+    });
 
     // Configuration
     this.config = {
@@ -217,12 +236,16 @@ class ProviderManager extends EventEmitter {
       circuitBreakerTrips: 0,
     });
 
-    // Initialize circuit breaker
+    // Initialize enhanced circuit breaker
     this.circuitBreakers.set(
       name,
-      new CircuitBreaker(name, {
+      new EnhancedCircuitBreaker(name, {
         threshold: this.config.circuitBreakerThreshold,
         timeout: this.config.circuitBreakerTimeout,
+        adaptiveThreshold: true,
+        failureRateThreshold: 0.5,
+        windowSize: 100,
+        windowTimeMs: 300000,
       })
     );
 
@@ -251,6 +274,23 @@ class ProviderManager extends EventEmitter {
    */
   getProviders() {
     return Array.from(this.providers.keys());
+  }
+
+  /**
+   * Get all registered providers (alias for getProviders)
+   * @returns {Array} Array of provider names
+   */
+  getRegisteredProviders() {
+    return this.getProviders();
+  }
+
+  /**
+   * Get a specific provider by name
+   * @param {string} name - Provider name
+   * @returns {Object|null} Provider instance or null if not found
+   */
+  getProvider(name) {
+    return this.providers.get(name) || null;
   }
 
   /**
@@ -296,7 +336,51 @@ class ProviderManager extends EventEmitter {
   }
 
   /**
-   * Execute operation with automatic fallback
+   * Execute operation with intelligent retry and fallback logic
+   * @param {Function} operation - Operation to execute
+   * @param {Array} providers - Preferred providers (optional)
+   * @param {Object} options - Execution options
+   * @returns {Promise<any>} Operation result
+   */
+  async executeWithIntelligentRetry(operation, providers = null, options = {}) {
+    try {
+      // Get available providers for retry system
+      const availableProviders =
+        providers ||
+        (await this.getEnhancedProviderFallbackList(null, options));
+
+      // Prepare providers for retry system
+      const retryProviders = availableProviders.map((providerInfo) => {
+        const providerName = providerInfo.name || providerInfo;
+        const providerInstance = this.providers.get(providerName);
+
+        return {
+          name: providerName,
+          provider: providerInstance,
+          maxRetries:
+            providerInfo.maxRetries || this.config.maxProviderRetries || 2,
+        };
+      });
+
+      // Execute with intelligent retry system
+      return await this.retrySystem.executeWithIntelligentRetry(
+        operation,
+        retryProviders,
+        {
+          ...options,
+          requestId: options.requestId || this.generateRequestId(),
+          context: options.context || {},
+          operationType: options.operationType || 'generateDream',
+        }
+      );
+    } catch (error) {
+      console.error('Intelligent retry execution failed:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Execute operation with automatic fallback (legacy method - enhanced with retry system)
    * @param {Function} operation - Operation to execute
    * @param {Array} providers - Preferred providers (optional)
    * @param {Object} options - Execution options
@@ -569,6 +653,88 @@ class ProviderManager extends EventEmitter {
 
     await Promise.allSettled(promises);
     return results;
+  }
+
+  /**
+   * Get provider health information
+   * @param {string} providerName - Specific provider name (optional)
+   * @returns {Object} Provider health information
+   */
+  getProviderHealth(providerName = null) {
+    if (providerName) {
+      const health = this.healthStatus.get(providerName);
+      const config = this.providerConfigs.get(providerName);
+      const metrics = this.metrics.get(providerName);
+      const circuitBreaker = this.circuitBreakers.get(providerName);
+
+      if (!health) {
+        return {
+          status: 'unknown',
+          error: 'Provider not found',
+          isHealthy: false,
+          lastCheck: null,
+          consecutiveFailures: 0,
+          circuitBreakerState: 'unknown',
+          enabled: false,
+        };
+      }
+
+      return {
+        status: health.isHealthy ? 'healthy' : 'unhealthy',
+        isHealthy: health.isHealthy,
+        lastCheck: health.lastCheck,
+        consecutiveFailures: health.consecutiveFailures || 0,
+        lastError: health.lastError,
+        circuitBreakerState: circuitBreaker
+          ? circuitBreaker.getState()
+          : 'unknown',
+        enabled: config?.enabled || false,
+        priority: config?.priority || 0,
+        metrics: {
+          requests: metrics?.requests || 0,
+          successes: metrics?.successes || 0,
+          failures: metrics?.failures || 0,
+          successRate:
+            metrics?.requests > 0 ? metrics.successes / metrics.requests : 0,
+          avgResponseTime: metrics?.avgResponseTime || 0,
+          lastRequestTime: metrics?.lastRequestTime,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    // Return health information for all providers
+    const allHealth = {
+      timestamp: new Date().toISOString(),
+      providers: {},
+      summary: {
+        total: 0,
+        healthy: 0,
+        unhealthy: 0,
+        enabled: 0,
+        disabled: 0,
+      },
+    };
+
+    for (const name of this.providers.keys()) {
+      const providerHealth = this.getProviderHealth(name);
+      allHealth.providers[name] = providerHealth;
+
+      allHealth.summary.total++;
+      if (providerHealth.isHealthy) {
+        allHealth.summary.healthy++;
+      } else {
+        allHealth.summary.unhealthy++;
+      }
+
+      if (providerHealth.enabled) {
+        allHealth.summary.enabled++;
+      } else {
+        allHealth.summary.disabled++;
+      }
+    }
+
+    return allHealth;
   }
 
   /**
@@ -1303,6 +1469,15 @@ class ProviderManager extends EventEmitter {
   }
 
   /**
+   * Generate unique request ID
+   * @returns {string} Unique request ID
+   * @private
+   */
+  generateRequestId() {
+    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  /**
    * Generate comprehensive failure report
    * @private
    */
@@ -1760,6 +1935,345 @@ class ProviderManager extends EventEmitter {
     this.removeAllListeners();
     console.log('ProviderManager destroyed');
   }
+
+  /**
+   * Get provider health information
+   * @param {string} providerName - Specific provider name (optional)
+   * @returns {Object} Health information for provider(s)
+   */
+  getProviderHealth(providerName = null) {
+    try {
+      // Check if ProviderManager is properly initialized
+      if (
+        !this.providers ||
+        !this.healthStatus ||
+        !this.providerConfigs ||
+        !this.metrics
+      ) {
+        return {
+          status: 'error',
+          error: 'ProviderManager not properly initialized',
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      if (providerName) {
+        // Return health for specific provider
+        const health = this.healthStatus.get(providerName);
+        const config = this.providerConfigs.get(providerName);
+        const metrics = this.metrics.get(providerName);
+        const circuitBreaker = this.circuitBreakers.get(providerName);
+
+        if (!health) {
+          return {
+            status: 'unknown',
+            error: `Provider not found: ${providerName}`,
+            timestamp: new Date().toISOString(),
+          };
+        }
+
+        // Enhanced health data with additional monitoring information
+        const healthData = {
+          status: health.isHealthy ? 'healthy' : 'unhealthy',
+          isHealthy: health.isHealthy,
+          lastCheck: health.lastCheck,
+          consecutiveFailures: health.consecutiveFailures || 0,
+          lastError: health.lastError,
+          enabled: config?.enabled || false,
+          circuitBreakerState: circuitBreaker?.state || 'unknown',
+          metrics: {
+            requests: metrics?.requests || 0,
+            successes: metrics?.successes || 0,
+            failures: metrics?.failures || 0,
+            successRate:
+              metrics?.requests > 0 ? metrics.successes / metrics.requests : 0,
+            failureRate:
+              metrics?.requests > 0 ? metrics.failures / metrics.requests : 0,
+            avgResponseTime: metrics?.avgResponseTime || 0,
+            lastRequestTime: metrics?.lastRequestTime,
+            rateLimitHits: metrics?.rateLimitHits || 0,
+            circuitBreakerTrips: metrics?.circuitBreakerTrips || 0,
+          },
+          timestamp: new Date().toISOString(),
+        };
+
+        // Add enhanced monitoring data if available
+        if (this.healthMonitor) {
+          try {
+            const enhancedHealth =
+              this.healthMonitor.getProviderHealth(providerName);
+            if (enhancedHealth) {
+              healthData.detailedHealth = enhancedHealth;
+            }
+          } catch (error) {
+            // Enhanced monitoring not available, continue with basic health data
+            healthData.monitoringNote = 'Enhanced monitoring unavailable';
+          }
+        }
+
+        return healthData;
+      }
+
+      // Return health for all providers
+      const allHealth = {};
+      const providerNames = Array.from(this.providers.keys());
+
+      for (const name of providerNames) {
+        try {
+          allHealth[name] = this.getProviderHealth(name);
+        } catch (error) {
+          allHealth[name] = {
+            status: 'error',
+            error: `Failed to get health for ${name}: ${error.message}`,
+            timestamp: new Date().toISOString(),
+          };
+        }
+      }
+
+      const healthyCount = Object.values(allHealth).filter(
+        (h) => h.isHealthy
+      ).length;
+      const unhealthyCount = Object.values(allHealth).filter(
+        (h) => !h.isHealthy
+      ).length;
+      const enabledCount = Object.values(allHealth).filter(
+        (h) => h.enabled
+      ).length;
+
+      return {
+        providers: allHealth,
+        summary: {
+          total: this.providers.size,
+          healthy: healthyCount,
+          unhealthy: unhealthyCount,
+          enabled: enabledCount,
+          disabled: this.providers.size - enabledCount,
+          overallStatus: healthyCount > 0 ? 'operational' : 'degraded',
+        },
+        monitoring: {
+          healthMonitorEnabled: !!this.healthMonitor,
+          metricsCollectorEnabled: !!this.metricsCollector,
+          alertingSystemEnabled: !!this.alertingSystem,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      // Handle any unexpected errors gracefully
+      return {
+        status: 'error',
+        error: `Failed to retrieve provider health: ${error.message}`,
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Update provider health status
+   * @param {string} providerName - Provider name
+   * @param {Object} healthData - Health data to update
+   */
+  updateProviderHealth(providerName, healthData) {
+    try {
+      if (!this.healthStatus.has(providerName)) {
+        console.warn(
+          `Cannot update health for unknown provider: ${providerName}`
+        );
+        return false;
+      }
+
+      const currentHealth = this.healthStatus.get(providerName);
+      const updatedHealth = {
+        ...currentHealth,
+        ...healthData,
+        lastCheck: new Date(),
+      };
+
+      this.healthStatus.set(providerName, updatedHealth);
+
+      // Emit health update event
+      this.emit('healthUpdated', {
+        provider: providerName,
+        health: updatedHealth,
+        timestamp: new Date(),
+      });
+
+      return true;
+    } catch (error) {
+      console.error(
+        `Failed to update health for ${providerName}:`,
+        error.message
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Get aggregated health data for monitoring dashboards
+   * @returns {Object} Aggregated health information
+   */
+  getAggregatedHealthData() {
+    try {
+      const allHealth = this.getProviderHealth();
+      const providers = allHealth.providers || {};
+
+      // Calculate aggregated metrics
+      let totalRequests = 0;
+      let totalSuccesses = 0;
+      let totalFailures = 0;
+      let totalResponseTime = 0;
+      let providerCount = 0;
+
+      Object.values(providers).forEach((provider) => {
+        if (provider.metrics) {
+          totalRequests += provider.metrics.requests || 0;
+          totalSuccesses += provider.metrics.successes || 0;
+          totalFailures += provider.metrics.failures || 0;
+          totalResponseTime += provider.metrics.avgResponseTime || 0;
+          providerCount++;
+        }
+      });
+
+      return {
+        ...allHealth,
+        aggregatedMetrics: {
+          totalRequests,
+          totalSuccesses,
+          totalFailures,
+          overallSuccessRate:
+            totalRequests > 0 ? totalSuccesses / totalRequests : 0,
+          overallFailureRate:
+            totalRequests > 0 ? totalFailures / totalRequests : 0,
+          averageResponseTime:
+            providerCount > 0 ? totalResponseTime / providerCount : 0,
+        },
+        systemHealth: {
+          status: allHealth.summary?.healthy > 0 ? 'operational' : 'degraded',
+          availableProviders: allHealth.summary?.healthy || 0,
+          totalProviders: allHealth.summary?.total || 0,
+          enabledProviders: allHealth.summary?.enabled || 0,
+        },
+      };
+    } catch (error) {
+      return {
+        status: 'error',
+        error: `Failed to get aggregated health data: ${error.message}`,
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Check if the ProviderManager is properly initialized
+   * @returns {boolean} True if initialized, false otherwise
+   */
+  isInitialized() {
+    return !!(
+      this.providers &&
+      this.healthStatus &&
+      this.providerConfigs &&
+      this.metrics &&
+      this.circuitBreakers
+    );
+  }
+
+  /**
+   * Get health status for monitoring endpoints
+   * @returns {Object} Health status suitable for monitoring endpoints
+   */
+  getHealthStatus() {
+    try {
+      if (!this.isInitialized()) {
+        return {
+          status: 'error',
+          message: 'ProviderManager not initialized',
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      const healthData = this.getProviderHealth();
+      const summary = healthData.summary || {};
+
+      return {
+        status: summary.healthy > 0 ? 'healthy' : 'unhealthy',
+        providers: {
+          total: summary.total || 0,
+          healthy: summary.healthy || 0,
+          unhealthy: summary.unhealthy || 0,
+          enabled: summary.enabled || 0,
+        },
+        monitoring: healthData.monitoring || {},
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      return {
+        status: 'error',
+        message: `Health check failed: ${error.message}`,
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Shutdown the provider manager and cleanup resources
+   */
+  async shutdown() {
+    console.log('Shutting down ProviderManager...');
+
+    // Stop health monitoring
+    this.stopHealthMonitoring();
+
+    // Cleanup load balancer
+    if (this.loadBalancer && this.loadBalancer.destroy) {
+      this.loadBalancer.destroy();
+    }
+
+    // Cleanup preference manager
+    if (this.preferenceManager && this.preferenceManager.destroy) {
+      this.preferenceManager.destroy();
+    }
+
+    // Shutdown all providers
+    for (const [name, provider] of this.providers) {
+      if (provider && typeof provider.shutdown === 'function') {
+        try {
+          await provider.shutdown();
+        } catch (error) {
+          console.error(`Error shutting down provider ${name}:`, error.message);
+        }
+      }
+    }
+
+    // Clear all maps
+    this.providers.clear();
+    this.providerConfigs.clear();
+    this.healthStatus.clear();
+    this.metrics.clear();
+    this.circuitBreakers.clear();
+
+    // Remove all listeners
+    this.removeAllListeners();
+
+    console.log('ProviderManager shutdown complete');
+  }
+
+  /**
+   * Generate dream using the best available provider
+   * @param {string} prompt - Dream prompt
+   * @param {Object} options - Generation options
+   * @returns {Promise<Object>} Generated dream
+   */
+  async generateDream(prompt, options = {}) {
+    const provider = await this.selectProvider({
+      operation: 'generateDream',
+      ...options,
+    });
+
+    if (!provider) {
+      throw new Error('No available providers for dream generation');
+    }
+
+    return await provider.instance.generateDream(prompt, options);
+  }
 }
 
 /**
@@ -1815,6 +2329,25 @@ class LoadBalancer {
         ? current
         : best
     );
+  }
+
+  /**
+   * Generate dream using the best available provider
+   * @param {string} prompt - Dream prompt
+   * @param {Object} options - Generation options
+   * @returns {Promise<Object>} Generated dream
+   */
+  async generateDream(prompt, options = {}) {
+    const provider = await this.selectProvider({
+      operation: 'generateDream',
+      ...options,
+    });
+
+    if (!provider) {
+      throw new Error('No available providers for dream generation');
+    }
+
+    return await provider.instance.generateDream(prompt, options);
   }
 }
 

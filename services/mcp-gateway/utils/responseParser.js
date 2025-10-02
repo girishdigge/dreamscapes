@@ -1,6 +1,84 @@
 // services/mcp-gateway/utils/responseParser.js
 // Convert raw LLM responses into usable JSON scene objects.
-// Attempts multiple strategies: direct JSON, choices[].message.content, extracting JSON substring.
+// Enhanced with robust response handling for different provider formats.
+
+const EnhancedResponseParser = require('./EnhancedResponseParser');
+const ResponseProcessingPipeline = require('./ResponseProcessingPipeline');
+
+// Create global parser instance
+const enhancedParser = new EnhancedResponseParser({
+  enableLogging: process.env.NODE_ENV !== 'production',
+  fallbackStrategies: true,
+});
+
+// Create global processing pipeline instance
+const processingPipeline = new ResponseProcessingPipeline({
+  enableLogging: process.env.NODE_ENV !== 'production',
+  enableFallbackStrategies: true,
+  enableResponseValidation: true,
+  enableContentSanitization: true,
+  maxProcessingAttempts: 5,
+});
+
+/**
+ * Safely extract content from any response format using robust processing pipeline
+ * @param {any} response - Raw response from provider
+ * @param {string} providerName - Provider name for context
+ * @param {string} operationType - Type of operation for context
+ * @returns {Promise<string|null>} Extracted content string
+ */
+async function extractContentSafely(
+  response,
+  providerName = 'unknown',
+  operationType = 'generateDream'
+) {
+  try {
+    // Use the robust processing pipeline for enhanced handling
+    const result = await processingPipeline.processResponse(
+      response,
+      providerName,
+      operationType,
+      { timestamp: Date.now() }
+    );
+
+    if (result.success && result.content) {
+      return result.content;
+    }
+
+    // Fallback to legacy parser if pipeline fails
+    console.warn(
+      `Processing pipeline failed for ${providerName}, falling back to legacy parser`
+    );
+    const legacyResult = enhancedParser.parseProviderResponse(
+      response,
+      providerName,
+      operationType
+    );
+
+    if (legacyResult.success && legacyResult.content) {
+      return legacyResult.content;
+    }
+
+    // Final attempt with recovery
+    if (!legacyResult.success) {
+      const recovery = enhancedParser.attemptContentRecovery(
+        response,
+        new Error(legacyResult.error?.message || 'Unknown error')
+      );
+      if (recovery.success && recovery.content) {
+        return recovery.content;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error(
+      `Content extraction failed for ${providerName}:`,
+      error.message
+    );
+    return null;
+  }
+}
 
 function _extractJsonString(text) {
   if (!text || typeof text !== 'string') return null;
@@ -30,8 +108,15 @@ function _extractJsonString(text) {
   return regexMatch ? regexMatch[1] : null;
 }
 
-function _normalizeRawResponse(raw) {
-  // raw could be object (API full response) or a string
+function _normalizeRawResponse(raw, providerName = 'unknown') {
+  // Enhanced normalization using the new parser
+  const result = enhancedParser.normalizeResponse(raw, providerName);
+
+  if (result.success) {
+    return result.data;
+  }
+
+  // Fallback to legacy logic for compatibility
   if (!raw) return null;
 
   // If OpenAI / Cerebras style: { choices: [{ message: { content } }] }
@@ -51,6 +136,7 @@ function _normalizeRawResponse(raw) {
     if (raw.output && typeof raw.output === 'string') return raw.output;
     if (raw.data && typeof raw.data === 'string') return raw.data;
     if (raw.text && typeof raw.text === 'string') return raw.text;
+    if (raw.content && typeof raw.content === 'string') return raw.content;
 
     // If it's already a JSON scene (object) — return as stringified
     // So parse functions can accept object directly
@@ -69,10 +155,43 @@ function _normalizeRawResponse(raw) {
   return null;
 }
 
-function parseDreamResponse(raw, source = 'unknown') {
+async function parseDreamResponse(raw, source = 'unknown') {
   try {
-    // Try to normalize to a string we can parse
-    const normalized = _normalizeRawResponse(raw);
+    // Use robust processing pipeline for enhanced handling
+    const result = await processingPipeline.processResponse(
+      raw,
+      source,
+      'generateDream',
+      { timestamp: Date.now() }
+    );
+
+    if (result.success && result.content) {
+      // Try to parse as JSON
+      try {
+        const parsed = JSON.parse(result.content);
+        return parsed;
+      } catch (jsonError) {
+        // If JSON parsing fails, try legacy extraction
+        const jsonStr = _extractJsonString(result.content);
+        if (jsonStr) {
+          try {
+            const parsed = JSON.parse(jsonStr);
+            return parsed;
+          } catch (parseErr) {
+            // attempt tiny fixes (replace trailing commas)
+            const tidy = jsonStr.replace(/,\s*([}\]])/g, '$1');
+            try {
+              return JSON.parse(tidy);
+            } catch (err2) {
+              // give up on JSON parsing, return null
+            }
+          }
+        }
+      }
+    }
+
+    // Fallback to legacy logic for compatibility
+    const normalized = _normalizeRawResponse(raw, source);
 
     if (!normalized) return null;
 
@@ -116,9 +235,9 @@ function parseDreamResponse(raw, source = 'unknown') {
   }
 }
 
-function parsePatchResponse(raw, baseJson, source = 'unknown') {
+async function parsePatchResponse(raw, baseJson, source = 'unknown') {
   // Similar strategy to parseDreamResponse, produce full patched JSON.
-  const parsed = parseDreamResponse(raw, source);
+  const parsed = await parseDreamResponse(raw, source);
   if (!parsed) {
     return null;
   }
@@ -130,8 +249,8 @@ function parsePatchResponse(raw, baseJson, source = 'unknown') {
   return parsed;
 }
 
-function parseStyleResponse(raw, baseJson, source = 'unknown') {
-  const parsed = parseDreamResponse(raw, source);
+async function parseStyleResponse(raw, baseJson, source = 'unknown') {
+  const parsed = await parseDreamResponse(raw, source);
   if (!parsed) return null;
 
   // If server returns only modifications, merge with baseJson
@@ -151,4 +270,7 @@ module.exports = {
   parseDreamResponse,
   parsePatchResponse,
   parseStyleResponse,
+  extractContentSafely,
+  enhancedParser,
+  processingPipeline,
 };

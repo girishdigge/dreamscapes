@@ -355,6 +355,58 @@ class ProviderPreferenceManager extends EventEmitter {
   }
 
   /**
+   * Apply contextual preferences based on request context
+   * @param {Object} context - Request context
+   * @returns {Object} Contextual preferences
+   */
+  applyContextualPreferences(context = {}) {
+    const contextualPrefs = {
+      providerAdjustments: {},
+      priorityBoosts: {},
+      restrictions: [],
+      preferredProviders: [],
+      excludedProviders: [],
+    };
+
+    // Apply contextual rules
+    for (const rule of this.contextualRules) {
+      if (this.matchesContext(rule.conditions, context)) {
+        // Apply provider adjustments
+        if (rule.adjustments) {
+          Object.assign(contextualPrefs.providerAdjustments, rule.adjustments);
+        }
+
+        // Apply priority boosts
+        if (rule.priorityBoosts) {
+          Object.assign(contextualPrefs.priorityBoosts, rule.priorityBoosts);
+        }
+
+        // Apply restrictions
+        if (rule.restrictions) {
+          contextualPrefs.restrictions.push(...rule.restrictions);
+        }
+      }
+    }
+
+    return contextualPrefs;
+  }
+
+  /**
+   * Check if context matches rule conditions
+   * @param {Object} conditions - Rule conditions
+   * @param {Object} context - Request context
+   * @returns {boolean} Whether context matches
+   */
+  matchesContext(conditions, context) {
+    for (const [key, value] of Object.entries(conditions)) {
+      if (context[key] !== value) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
    * Get comprehensive provider preferences for selection
    * @param {string} providerName - Provider name
    * @param {Object} context - Request context
@@ -368,7 +420,10 @@ class ProviderPreferenceManager extends EventEmitter {
 
     const priority = this.getProviderPriority(providerName);
     const contextualAdjustment =
-      contextualPrefs.providerAdjustments[providerName] || 0;
+      (contextualPrefs &&
+        contextualPrefs.providerAdjustments &&
+        contextualPrefs.providerAdjustments[providerName]) ||
+      0;
 
     return {
       basePriority:
@@ -442,6 +497,18 @@ class ProviderPreferenceManager extends EventEmitter {
     }, 3600000); // Every hour
 
     console.log('Dynamic adjustment decay started');
+  }
+
+  /**
+   * Stop dynamic adjustment decay process
+   * @private
+   */
+  stopAdjustmentDecay() {
+    if (this.decayInterval) {
+      clearInterval(this.decayInterval);
+      this.decayInterval = null;
+      console.log('Dynamic adjustment decay stopped');
+    }
   }
 
   /**

@@ -187,6 +187,7 @@ class HealthMonitor extends EventEmitter {
     const wasHealthy = healthInfo.isHealthy;
     healthInfo.isHealthy = isHealthy;
     healthInfo.lastCheck = new Date(now);
+    healthInfo.lastResponseTime = responseTime;
     healthInfo.checkCount++;
 
     // Track uptime/downtime
@@ -628,6 +629,142 @@ class HealthMonitor extends EventEmitter {
     } else {
       throw new Error(`Unsupported export format: ${format}`);
     }
+  }
+
+  /**
+   * Check health for all providers
+   * @param {Array} providers - Array of provider objects
+   */
+  async checkAllProviders(providers) {
+    const checkPromises = providers.map(async (provider) => {
+      try {
+        await this.checkProviderHealth(provider.name);
+      } catch (error) {
+        console.warn(
+          `Health check failed for ${provider.name}:`,
+          error.message
+        );
+      }
+    });
+
+    await Promise.allSettled(checkPromises);
+  }
+
+  /**
+   * Get overall system health status
+   * @returns {Object} Overall health status
+   */
+  getOverallHealth() {
+    const providers = Array.from(this.healthData.keys());
+    let healthyCount = 0;
+    let unhealthyCount = 0;
+
+    for (const providerName of providers) {
+      const healthInfo = this.healthData.get(providerName);
+      if (healthInfo && healthInfo.isHealthy) {
+        healthyCount++;
+      } else {
+        unhealthyCount++;
+      }
+    }
+
+    let status = 'healthy';
+    if (unhealthyCount === providers.length) {
+      status = 'unhealthy';
+    } else if (unhealthyCount > 0) {
+      status = 'degraded';
+    }
+
+    return {
+      status,
+      healthyProviders: healthyCount,
+      unhealthyProviders: unhealthyCount,
+      totalProviders: providers.length,
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Get provider health status
+   * @param {string} providerName - Provider name
+   * @returns {Object} Provider health status
+   */
+  getProviderHealth(providerName) {
+    const healthInfo = this.healthData.get(providerName);
+    if (!healthInfo) {
+      throw new Error(`Provider not found: ${providerName}`);
+    }
+
+    return {
+      status: healthInfo.isHealthy ? 'healthy' : 'unhealthy',
+      lastCheck: healthInfo.lastCheck,
+      latency: Math.max(0, healthInfo.lastResponseTime || 0),
+      error: healthInfo.lastError,
+      consecutiveFailures: healthInfo.consecutiveFailures,
+      uptime: healthInfo.uptime,
+    };
+  }
+
+  /**
+   * Get health history for a provider
+   * @param {string} providerName - Provider name
+   * @param {number} limit - Maximum number of history entries
+   * @returns {Array} Health history
+   */
+  getHealthHistory(providerName, limit = 100) {
+    const history = this.metricsHistory.get(providerName);
+    if (!history) {
+      throw new Error(`Provider not found: ${providerName}`);
+    }
+
+    return history.slice(-limit).map((entry) => ({
+      timestamp: new Date(entry.timestamp),
+      status: entry.isHealthy ? 'healthy' : 'unhealthy',
+      responseTime: entry.responseTime,
+      error: entry.error,
+    }));
+  }
+
+  /**
+   * Get health trends for a provider
+   * @param {string} providerName - Provider name
+   * @returns {Object} Health trends
+   */
+  getHealthTrends(providerName) {
+    const history = this.getHealthHistory(providerName, 50); // Last 50 checks
+
+    if (history.length === 0) {
+      return {
+        trend: 'stable',
+        recentFailures: 0,
+        uptime: 1.0,
+      };
+    }
+
+    const recentFailures = history.filter(
+      (h) => h.status === 'unhealthy'
+    ).length;
+    const uptime = (history.length - recentFailures) / history.length;
+
+    // Determine trend based on recent history
+    const recentHistory = history.slice(-10); // Last 10 checks
+    const recentFailureCount = recentHistory.filter(
+      (h) => h.status === 'unhealthy'
+    ).length;
+
+    let trend = 'stable';
+    if (recentFailureCount >= 3) {
+      // More sensitive threshold
+      trend = 'declining';
+    } else if (recentFailureCount === 0 && recentFailures > 0) {
+      trend = 'improving';
+    }
+
+    return {
+      trend,
+      recentFailures,
+      uptime,
+    };
   }
 
   /**

@@ -13,7 +13,7 @@ const dreamSchema = {
     title: {
       type: 'string',
       minLength: 1,
-      maxLength: 200,
+      maxLength: 500,
     },
     style: {
       type: 'string',
