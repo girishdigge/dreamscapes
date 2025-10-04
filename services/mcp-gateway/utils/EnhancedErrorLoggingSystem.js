@@ -147,10 +147,8 @@ class EnhancedErrorLoggingSystem extends EventEmitter {
           maxFiles: this.config.maxFiles,
           format: winston.format.combine(
             winston.format.timestamp(),
-            winston.format.json(),
-            winston.format((info) => {
-              return info.errorType === 'response_parsing' ? info : false;
-            })()
+            winston.format.errors({ stack: true }),
+            winston.format.json()
           ),
         })
       );
@@ -164,10 +162,8 @@ class EnhancedErrorLoggingSystem extends EventEmitter {
           maxFiles: this.config.maxFiles,
           format: winston.format.combine(
             winston.format.timestamp(),
-            winston.format.json(),
-            winston.format((info) => {
-              return info.providerName ? info : false;
-            })()
+            winston.format.errors({ stack: true }),
+            winston.format.json()
           ),
         })
       );
@@ -181,10 +177,8 @@ class EnhancedErrorLoggingSystem extends EventEmitter {
           maxFiles: this.config.maxFiles,
           format: winston.format.combine(
             winston.format.timestamp(),
-            winston.format.json(),
-            winston.format((info) => {
-              return info.severity === 'critical' ? info : false;
-            })()
+            winston.format.errors({ stack: true }),
+            winston.format.json()
           ),
         })
       );
@@ -201,10 +195,8 @@ class EnhancedErrorLoggingSystem extends EventEmitter {
           maxFiles: this.config.maxFiles,
           format: winston.format.combine(
             winston.format.timestamp(),
-            winston.format.json(),
-            winston.format((info) => {
-              return info.type === 'monitoring' ? info : false;
-            })()
+            winston.format.errors({ stack: true }),
+            winston.format.json()
           ),
         })
       );

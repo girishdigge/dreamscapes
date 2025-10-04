@@ -2263,16 +2263,16 @@ class ProviderManager extends EventEmitter {
    * @returns {Promise<Object>} Generated dream
    */
   async generateDream(prompt, options = {}) {
-    const provider = await this.selectProvider({
+    const providerInfo = await this.selectProvider({
       operation: 'generateDream',
       ...options,
     });
 
-    if (!provider) {
+    if (!providerInfo || !providerInfo.provider) {
       throw new Error('No available providers for dream generation');
     }
 
-    return await provider.instance.generateDream(prompt, options);
+    return await providerInfo.provider.generateDream(prompt, options);
   }
 }
 

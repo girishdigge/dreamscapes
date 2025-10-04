@@ -982,28 +982,83 @@ class AlertingSystem extends EventEmitter {
   }
 
   /**
+   * Set the metrics collector for accessing provider metrics
+   * @param {MetricsCollector} metricsCollector - Metrics collector instance
+   */
+  setMetricsCollector(metricsCollector) {
+    this.metricsCollector = metricsCollector;
+  }
+
+  /**
    * Check consecutive failure alerts for a provider
    * @param {string} provider - Provider name
    */
   async checkConsecutiveFailureAlerts(provider) {
-    // Get recent alerts for this provider to check for consecutive failures
+    if (!provider) {
+      console.log('checkConsecutiveFailureAlerts: No provider specified');
+      return;
+    }
+
+    // Get provider metrics to check for consecutive failures
+    let consecutiveFailures = 0;
+
+    // Try to get metrics from MetricsCollector first
+    if (this.metricsCollector && this.metricsCollector.getProviderMetrics) {
+      try {
+        const metrics = this.metricsCollector.getProviderMetrics(provider);
+        if (metrics && typeof metrics.consecutiveFailures === 'number') {
+          consecutiveFailures = metrics.consecutiveFailures;
+        }
+      } catch (error) {
+        console.log(
+          'Failed to get metrics from MetricsCollector:',
+          error.message
+        );
+      }
+    }
+
+    // Fallback to ProviderManager if available
+    if (
+      consecutiveFailures === 0 &&
+      this.providerManager &&
+      this.providerManager.getProviderMetrics
+    ) {
+      const metrics = this.providerManager.getProviderMetrics(provider);
+      if (metrics && typeof metrics.consecutiveFailures === 'number') {
+        consecutiveFailures = metrics.consecutiveFailures;
+      }
+    }
+
+    // Also check recent failure alerts as a fallback
     const recentAlerts = this.getRecentAlerts(provider, 1); // Last hour
     const failureAlerts = recentAlerts.filter(
       (alert) =>
         alert.type === 'operation_failure' ||
-        alert.type === 'health_check_failed'
+        alert.type === 'health_check_failed' ||
+        alert.type === 'error_rate'
     );
 
-    if (
-      failureAlerts.length >= this.config.alertThresholds.consecutiveFailures
-    ) {
+    // Use the higher of the two counts
+    const failureCount = Math.max(consecutiveFailures, failureAlerts.length);
+
+    console.log('checkConsecutiveFailureAlerts:', {
+      provider,
+      consecutiveFailures,
+      failureAlertsCount: failureAlerts.length,
+      finalCount: failureCount,
+      threshold: this.config.alertThresholds.consecutiveFailures,
+      shouldAlert:
+        failureCount >= this.config.alertThresholds.consecutiveFailures,
+    });
+
+    if (failureCount >= this.config.alertThresholds.consecutiveFailures) {
       await this.processAlert({
         type: 'consecutive_failures',
         severity: 'high',
         provider,
-        message: `${failureAlerts.length} consecutive failures detected`,
+        message: `${failureCount} consecutive failures detected`,
         data: {
-          consecutiveFailures: failureAlerts.length,
+          consecutiveFailures: failureCount,
           threshold: this.config.alertThresholds.consecutiveFailures,
           recentFailures: failureAlerts.slice(-5), // Last 5 failures
         },

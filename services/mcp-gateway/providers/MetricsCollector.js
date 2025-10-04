@@ -935,6 +935,16 @@ class MetricsCollector extends EventEmitter {
     const successCount = successfulRequests.length;
     const failureCount = failedRequests.length;
 
+    // Calculate consecutive failures from the end of the metrics array
+    let consecutiveFailures = 0;
+    for (let i = requestMetrics.length - 1; i >= 0; i--) {
+      if (!requestMetrics[i].success) {
+        consecutiveFailures++;
+      } else {
+        break; // Stop at first success
+      }
+    }
+
     return {
       totalRequests,
       successfulRequests: successCount,
@@ -944,6 +954,7 @@ class MetricsCollector extends EventEmitter {
       averageResponseTime:
         totalRequests > 0 ? totalResponseTime / totalRequests : 0,
       totalTokens,
+      consecutiveFailures,
     };
   }
 

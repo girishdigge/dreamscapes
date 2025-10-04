@@ -14,6 +14,7 @@ class ResponseCache {
       maxCacheSize: config.maxCacheSize || 10000,
       enableSemanticSimilarity: config.enableSemanticSimilarity !== false,
       similarityThreshold: config.similarityThreshold || 0.85,
+      connectionTimeout: config.connectionTimeout || 5000, // 5 seconds default
       ...config,
     };
 
@@ -49,31 +50,55 @@ class ResponseCache {
     try {
       this.client = redis.createClient({
         url: this.config.redisUrl,
+        socket: {
+          connectTimeout: this.config.connectionTimeout,
+          commandTimeout: this.config.connectionTimeout,
+        },
         retry_strategy: (options) => {
           if (options.error && options.error.code === 'ECONNREFUSED') {
             logger.warn('Redis connection refused, using fallback cache');
             return undefined; // Don't retry
           }
-          if (options.total_retry_time > 1000 * 60 * 60) {
+          if (options.total_retry_time > this.config.connectionTimeout) {
             return new Error('Retry time exhausted');
           }
-          if (options.attempt > 10) {
+          if (options.attempt > 3) {
+            // Reduce retry attempts for faster failure
             return undefined;
           }
-          return Math.min(options.attempt * 100, 3000);
+          return Math.min(options.attempt * 100, 1000); // Shorter retry intervals
         },
       });
 
       this.client.on('error', (err) => {
         logger.error('Redis client error:', err);
         this.stats.errors++;
+        // Set client to null on connection errors to trigger fallback
+        this.client = null;
       });
 
       this.client.on('connect', () => {
         logger.info('Connected to Redis cache');
       });
 
-      await this.client.connect();
+      // Connect with timeout
+      await Promise.race([
+        this.client.connect(),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Connection timeout')),
+            this.config.connectionTimeout
+          )
+        ),
+      ]);
+
+      // Test the connection by trying a simple operation with timeout
+      await Promise.race([
+        this.client.ping(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Ping timeout')), 1000)
+        ),
+      ]);
     } catch (error) {
       logger.warn(
         'Failed to connect to Redis, using in-memory fallback:',
@@ -130,20 +155,57 @@ class ResponseCache {
 
       // Try exact match first
       if (this.client) {
-        const cached = await this.client.get(key);
-        if (cached) {
-          result = JSON.parse(cached);
-          this.stats.hits++;
-          EnhancedLogger.logCacheHit(key, 'redis-exact');
-          return result;
+        try {
+          const cached = await this.client.get(key);
+          if (cached) {
+            try {
+              result = JSON.parse(cached);
+              this.stats.hits++;
+              EnhancedLogger.logCacheHit(key, 'redis-exact');
+              return result;
+            } catch (parseError) {
+              logger.warn('Malformed cache data found, removing:', key);
+              await this.client.del(key);
+              // Continue to check other sources
+            }
+          }
+        } catch (redisError) {
+          logger.warn(
+            'Redis operation failed, falling back to memory cache:',
+            redisError.message
+          );
+          this.client = null; // Trigger fallback for subsequent operations
         }
-      } else {
+      }
+
+      if (!this.client) {
         // Fallback to in-memory cache
         result = this.fallbackCache.get(key);
         if (result) {
-          this.stats.hits++;
-          EnhancedLogger.logCacheHit(key, 'memory-exact');
-          return result;
+          // Check if result is valid cache entry (should be an object, not a string)
+          if (typeof result === 'string') {
+            logger.warn(
+              'Malformed cache data found in memory (string instead of object), removing:',
+              key
+            );
+            this.fallbackCache.delete(key);
+            // Continue to check other sources
+          } else {
+            try {
+              // Verify it's valid JSON-serializable data
+              JSON.stringify(result);
+              this.stats.hits++;
+              EnhancedLogger.logCacheHit(key, 'memory-exact');
+              return result;
+            } catch (parseError) {
+              logger.warn(
+                'Malformed cache data found in memory, removing:',
+                key
+              );
+              this.fallbackCache.delete(key);
+              // Continue to check other sources
+            }
+          }
         }
       }
 
@@ -187,21 +249,32 @@ class ResponseCache {
       };
 
       if (this.client) {
-        await this.client.setEx(key, ttl, JSON.stringify(cacheEntry));
+        try {
+          await this.client.setEx(key, ttl, JSON.stringify(cacheEntry));
 
-        // Store prompt for semantic similarity
-        if (value.originalPrompt) {
-          await this.client.setEx(
-            `prompt:${key}`,
-            ttl,
-            JSON.stringify({
-              prompt: value.originalPrompt,
-              normalized: this.normalizePrompt(value.originalPrompt),
-              quality: quality,
-            })
+          // Store prompt for semantic similarity
+          if (value.originalPrompt) {
+            await this.client.setEx(
+              `prompt:${key}`,
+              ttl,
+              JSON.stringify({
+                prompt: value.originalPrompt,
+                normalized: this.normalizePrompt(value.originalPrompt),
+                quality: quality,
+              })
+            );
+          }
+        } catch (redisError) {
+          logger.warn(
+            'Redis operation failed, falling back to memory cache:',
+            redisError.message
           );
+          this.client = null;
+          // Fall through to in-memory cache
         }
-      } else {
+      }
+
+      if (!this.client) {
         // Fallback to in-memory cache with size limit
         if (this.fallbackCache.size >= this.config.maxCacheSize) {
           this.evictOldestEntries();

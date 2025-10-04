@@ -375,11 +375,20 @@ class EnhancedLoadBalancer extends EventEmitter {
       });
     }
 
-    // Filter by minimum success rate
+    // Filter by minimum success rate (but allow new providers with no history)
     const minSuccessRate = requirements.minSuccessRate || 0.5;
-    candidates = candidates.filter(
-      (p) => (p.metrics?.successRate || 0) >= minSuccessRate
-    );
+    candidates = candidates.filter((p) => {
+      const successRate = p.metrics?.successRate || 0;
+      const totalRequests = p.metrics?.requests || 0;
+
+      // Allow providers with no request history (new providers)
+      if (totalRequests === 0) {
+        return true;
+      }
+
+      // For providers with history, check success rate
+      return successRate >= minSuccessRate;
+    });
 
     // Filter by maximum response time
     if (requirements.maxResponseTime) {

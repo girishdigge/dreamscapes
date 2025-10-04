@@ -100,6 +100,24 @@ class EnhancedErrorLoggingIntegration extends EventEmitter {
       fs.mkdirSync(this.config.logDirectory, { recursive: true });
     }
 
+    // Validate winston format availability
+    if (!winston.format || typeof winston.format.combine !== 'function') {
+      console.warn(
+        'Winston format not available, using basic logger configuration'
+      );
+      this.logger = winston.createLogger({
+        level: this.config.logLevel,
+        format: winston.format ? winston.format.json() : undefined,
+        transports: [
+          new winston.transports.Console({
+            level: this.config.logLevel,
+          }),
+        ],
+        exitOnError: false,
+      });
+      return;
+    }
+
     const transports = [];
 
     // Console transport with enhanced formatting
@@ -148,10 +166,8 @@ class EnhancedErrorLoggingIntegration extends EventEmitter {
           maxFiles: this.config.maxFiles,
           format: winston.format.combine(
             winston.format.timestamp(),
-            winston.format.json(),
-            winston.format((info) => {
-              return info.errorType === 'response_parsing' ? info : false;
-            })()
+            winston.format.errors({ stack: true }),
+            winston.format.json()
           ),
         })
       );
@@ -165,10 +181,8 @@ class EnhancedErrorLoggingIntegration extends EventEmitter {
           maxFiles: this.config.maxFiles,
           format: winston.format.combine(
             winston.format.timestamp(),
-            winston.format.json(),
-            winston.format((info) => {
-              return info.providerName ? info : false;
-            })()
+            winston.format.errors({ stack: true }),
+            winston.format.json()
           ),
         })
       );
@@ -182,10 +196,8 @@ class EnhancedErrorLoggingIntegration extends EventEmitter {
           maxFiles: this.config.maxFiles,
           format: winston.format.combine(
             winston.format.timestamp(),
-            winston.format.json(),
-            winston.format((info) => {
-              return info.severity === 'critical' ? info : false;
-            })()
+            winston.format.errors({ stack: true }),
+            winston.format.json()
           ),
         })
       );
@@ -202,10 +214,8 @@ class EnhancedErrorLoggingIntegration extends EventEmitter {
           maxFiles: this.config.maxFiles,
           format: winston.format.combine(
             winston.format.timestamp(),
-            winston.format.json(),
-            winston.format((info) => {
-              return info.type === 'monitoring' ? info : false;
-            })()
+            winston.format.errors({ stack: true }),
+            winston.format.json()
           ),
         })
       );
@@ -768,7 +778,9 @@ class EnhancedErrorLoggingIntegration extends EventEmitter {
     ) {
       return 'critical';
     }
-    if (message.includes('substring is not a function')) {
+
+    // High severity errors
+    if (message.includes('is not a function')) {
       return 'high';
     }
     if (
@@ -783,6 +795,8 @@ class EnhancedErrorLoggingIntegration extends EventEmitter {
     ) {
       return 'high';
     }
+
+    // Medium severity errors
     if (message.includes('timeout')) {
       return 'medium';
     }
@@ -1418,6 +1432,13 @@ class EnhancedErrorLoggingIntegration extends EventEmitter {
     }
 
     console.log('Real-time error tracking stopped');
+  }
+
+  /**
+   * Close logger (alias for destroy for compatibility)
+   */
+  close() {
+    this.destroy();
   }
 
   /**

@@ -22,7 +22,8 @@ class EnhancedResponseParser {
         const LoggingIntegrationLayer = require('./LoggingIntegrationLayer');
         this.loggingIntegration = new LoggingIntegrationLayer({
           enableEnhancedLogging: true,
-          enableMonitoringIntegration: true,
+          enableMonitoringIntegration:
+            this.config.enableMonitoringIntegration !== false,
           enableStructuredLogging: true,
         });
 

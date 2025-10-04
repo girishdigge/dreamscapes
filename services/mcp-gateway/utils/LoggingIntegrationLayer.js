@@ -527,7 +527,7 @@ class LoggingIntegrationLayer {
     }
 
     // High severity errors
-    if (message.includes('substring is not a function')) {
+    if (message.includes('is not a function')) {
       return 'high';
     }
     if (

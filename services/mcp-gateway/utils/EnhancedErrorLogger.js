@@ -58,8 +58,13 @@ class EnhancedErrorLogger {
     // Initialize logging system
     this.initializeLogger();
 
-    // Start monitoring integration if enabled
-    if (this.config.enableMonitoringIntegration) {
+    // Start monitoring integration if enabled and not in test environment
+    if (
+      this.config.enableMonitoringIntegration &&
+      process.env.NODE_ENV !== 'test' &&
+      process.env.DISABLE_MONITORING !== 'true' &&
+      process.env.ENABLE_MONITORING_INTEGRATION !== 'false'
+    ) {
       this.startMonitoringIntegration();
     }
 
@@ -129,10 +134,8 @@ class EnhancedErrorLogger {
           maxFiles: this.config.maxFiles,
           format: winston.format.combine(
             winston.format.timestamp(),
-            winston.format.json(),
-            winston.format((info) => {
-              return info.errorType === 'response_parsing' ? info : false;
-            })()
+            winston.format.errors({ stack: true }),
+            winston.format.json()
           ),
         })
       );
@@ -146,10 +149,8 @@ class EnhancedErrorLogger {
           maxFiles: this.config.maxFiles,
           format: winston.format.combine(
             winston.format.timestamp(),
-            winston.format.json(),
-            winston.format((info) => {
-              return info.providerName ? info : false;
-            })()
+            winston.format.errors({ stack: true }),
+            winston.format.json()
           ),
         })
       );
@@ -163,10 +164,8 @@ class EnhancedErrorLogger {
           maxFiles: this.config.maxFiles,
           format: winston.format.combine(
             winston.format.timestamp(),
-            winston.format.json(),
-            winston.format((info) => {
-              return info.severity === 'critical' ? info : false;
-            })()
+            winston.format.errors({ stack: true }),
+            winston.format.json()
           ),
         })
       );

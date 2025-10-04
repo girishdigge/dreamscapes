@@ -5,19 +5,23 @@
 const EnhancedResponseParser = require('./EnhancedResponseParser');
 const ResponseProcessingPipeline = require('./ResponseProcessingPipeline');
 
-// Create global parser instance
+// Create global parser instance with test-aware configuration
 const enhancedParser = new EnhancedResponseParser({
-  enableLogging: process.env.NODE_ENV !== 'production',
+  enableLogging:
+    process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test',
   fallbackStrategies: true,
+  enableMonitoringIntegration: process.env.NODE_ENV !== 'test',
 });
 
-// Create global processing pipeline instance
+// Create global processing pipeline instance with test-aware configuration
 const processingPipeline = new ResponseProcessingPipeline({
-  enableLogging: process.env.NODE_ENV !== 'production',
+  enableLogging:
+    process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test',
   enableFallbackStrategies: true,
   enableResponseValidation: true,
   enableContentSanitization: true,
   maxProcessingAttempts: 5,
+  enableMonitoringIntegration: process.env.NODE_ENV !== 'test',
 });
 
 /**

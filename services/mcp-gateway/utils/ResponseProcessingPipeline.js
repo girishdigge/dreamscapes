@@ -25,6 +25,7 @@ class ResponseProcessingPipeline {
       enableLogging: this.config.enableLogging,
       maxContentLength: this.config.maxContentLength,
       fallbackStrategies: this.config.enableFallbackStrategies,
+      enableMonitoringIntegration: this.config.enableMonitoringIntegration,
     });
 
     // Processing stage registry
