@@ -3,6 +3,16 @@
 
 const EventEmitter = require('events');
 
+// Import TestCleanupManager for proper resource cleanup
+let TestCleanupManager;
+try {
+  const testCleanup = require('../tests/utils/testCleanup');
+  TestCleanupManager = testCleanup.testCleanupManager;
+} catch (error) {
+  // TestCleanupManager not available (not in test environment)
+  TestCleanupManager = null;
+}
+
 /**
  * Error Monitoring Integration - Bridges error logging with monitoring systems
  * Provides real-time error tracking, alerting, and integration with existing monitoring
@@ -52,10 +62,22 @@ class ErrorMonitoringIntegration extends EventEmitter {
     this.trackingInterval = null;
     this.reportingInterval = null;
 
+    // Register with TestCleanupManager if in test environment
+    if (TestCleanupManager && process.env.NODE_ENV === 'test') {
+      TestCleanupManager.registerResource(
+        this,
+        'destroy',
+        'ErrorMonitoringIntegration.constructor'
+      );
+    }
+
     console.log('ErrorMonitoringIntegration initialized with config:', {
       enableRealTimeTracking: this.config.enableRealTimeTracking,
       enableAlertingIntegration: this.config.enableAlertingIntegration,
       enableMetricsIntegration: this.config.enableMetricsIntegration,
+      testCleanupRegistered: !!(
+        TestCleanupManager && process.env.NODE_ENV === 'test'
+      ),
     });
   }
 
@@ -141,9 +163,38 @@ class ErrorMonitoringIntegration extends EventEmitter {
       this.performReportingTasks();
     }, this.config.reportingInterval);
 
+    // Register intervals with TestCleanupManager if available (test environment)
+    if (TestCleanupManager && process.env.NODE_ENV === 'test') {
+      TestCleanupManager.trackInterval(
+        this.trackingInterval,
+        'ErrorMonitoringIntegration.trackingInterval'
+      );
+      TestCleanupManager.trackInterval(
+        this.reportingInterval,
+        'ErrorMonitoringIntegration.reportingInterval'
+      );
+
+      // Register this instance for cleanup
+      TestCleanupManager.registerResource(
+        this,
+        'destroy',
+        'ErrorMonitoringIntegration'
+      );
+
+      // Register cleanup callback
+      TestCleanupManager.registerCleanupCallback(() => {
+        this.stopRealTimeTracking();
+      });
+    }
+
     console.log('Real-time error tracking started', {
       trackingInterval: this.config.trackingInterval,
       reportingInterval: this.config.reportingInterval,
+      trackingIntervalId: this.trackingInterval,
+      reportingIntervalId: this.reportingInterval,
+      testCleanupRegistered: !!(
+        TestCleanupManager && process.env.NODE_ENV === 'test'
+      ),
     });
   }
 

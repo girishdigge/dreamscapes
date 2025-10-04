@@ -10,6 +10,7 @@ const cerebrasService = require('./services/cerebrasService');
 const openaiService = require('./services/openaiService');
 const promptBuilder = require('./services/promptBuilder');
 const responseParser = require('./utils/responseParser');
+const asyncHelpers = require('./utils/asyncHelpers');
 const {
   errorHandler,
   asyncHandler,
@@ -23,8 +24,28 @@ const MonitoringMiddleware = require('./middleware/monitoringMiddleware');
 // Import performance optimization middleware
 const PerformanceMiddleware = require('./middleware/performanceMiddleware');
 
+// Import request validation middleware
+const RequestValidator = require('./middleware/requestValidator');
+
+// Import enhanced response transformation
+const EnhancedResponseTransformer = require('./utils/EnhancedResponseTransformer');
+
+// Import gateway fallback handler
+const GatewayFallbackHandler = require('./utils/GatewayFallbackHandler');
+
+// Import error response builder
+const ErrorResponseBuilder = require('./utils/ErrorResponseBuilder');
+
+// Import extraction metrics collector
+const ExtractionMetricsCollector = require('./utils/ExtractionMetricsCollector');
+
 // Import enhanced validation and repair system
 const { ValidationPipeline } = require('./engine');
+
+// Import shared validation monitor
+// In Docker: ./shared (copied to /app/shared)
+// In local dev: ../../shared (workspace root)
+const { validationMonitor } = require('../../shared');
 
 // Import enhanced caching system
 const { getCacheService } = require('./services/cacheService');
@@ -78,8 +99,7 @@ const initializeProviderManager = async () => {
           apiUrl:
             process.env.CEREBRAS_API_URL ||
             'https://api.cerebras.ai/v1/chat/completions',
-          model:
-            process.env.CEREBRAS_MODEL || 'llama-4-maverick-17b-128e-instruct',
+          model: process.env.CEREBRAS_MODEL || 'llama-3.3-70b',
         });
 
         providerManager.registerProvider('cerebras', cerebrasInstance, {
@@ -264,6 +284,44 @@ const performanceConfig = {
 };
 
 const performanceMiddleware = new PerformanceMiddleware(performanceConfig);
+
+// Initialize request validator
+const requestValidator = new RequestValidator({
+  strictMode: process.env.STRICT_VALIDATION !== 'false',
+  logValidation: process.env.LOG_VALIDATION !== 'false',
+});
+
+// Initialize extraction metrics collector
+const extractionMetricsCollector = new ExtractionMetricsCollector({
+  enableLogging: process.env.LOG_EXTRACTION_METRICS !== 'false',
+  maxHistorySize: parseInt(process.env.EXTRACTION_HISTORY_SIZE) || 1000,
+  aggregationInterval:
+    parseInt(process.env.EXTRACTION_AGGREGATION_INTERVAL) || 60000,
+  syncInterval: parseInt(process.env.EXTRACTION_SYNC_INTERVAL) || 300000,
+});
+
+// Initialize response transformer
+const responseTransformer = new EnhancedResponseTransformer({
+  enableValidation: process.env.ENABLE_RESPONSE_VALIDATION !== 'false',
+  enableRepair: process.env.ENABLE_RESPONSE_REPAIR !== 'false',
+  strictMode: process.env.STRICT_VALIDATION !== 'false',
+  logTransformations: process.env.LOG_TRANSFORMATIONS !== 'false',
+  extractionMetricsCollector: extractionMetricsCollector,
+});
+
+// Initialize fallback handler
+const fallbackHandler = new GatewayFallbackHandler({
+  enableFallbackGeneration: process.env.ENABLE_FALLBACK_GENERATION !== 'false',
+  enableEmergencyRepair: process.env.ENABLE_EMERGENCY_REPAIR !== 'false',
+  logFallbacks: process.env.LOG_FALLBACKS !== 'false',
+});
+
+// Initialize error response builder
+const errorResponseBuilder = new ErrorResponseBuilder({
+  includeStackTrace: process.env.NODE_ENV === 'development',
+  includeResponseSample: process.env.INCLUDE_ERROR_SAMPLES !== 'false',
+  maxSampleLength: 500,
+});
 
 // ProviderManager will be initialized in startup
 
@@ -466,6 +524,101 @@ app.get('/metrics/validation', (req, res) => {
   }
 });
 
+// Extraction metrics endpoint
+app.get('/metrics/extraction', (req, res) => {
+  logger.debug('Extraction metrics requested');
+  try {
+    // Get extraction metrics from collector
+    const extractionMetrics = extractionMetricsCollector.getMetricsReport();
+
+    // Get validation metrics from shared ValidationMonitor
+    const validationMetrics = validationMonitor
+      ? {
+          overall: validationMonitor.getOverallMetrics(),
+          byService: validationMonitor.getServiceMetrics('mcp-gateway'),
+          recentFailures: validationMonitor.getRecentFailures(10),
+        }
+      : null;
+
+    // Get repair metrics from shared ValidationMonitor
+    const repairMetrics =
+      validationMonitor && validationMonitor.metrics.repairs
+        ? {
+            total: validationMonitor.metrics.repairs.total || 0,
+            successful: validationMonitor.metrics.repairs.successful || 0,
+            failed: validationMonitor.metrics.repairs.failed || 0,
+            successRate:
+              validationMonitor.metrics.repairs.total > 0
+                ? (validationMonitor.metrics.repairs.successful /
+                    validationMonitor.metrics.repairs.total) *
+                  100
+                : 0,
+            byProvider: validationMonitor.metrics.repairs.byProvider || {},
+            byStrategy: validationMonitor.metrics.repairs.byStrategy || {},
+          }
+        : null;
+
+    // Generate extraction alerts
+    const extractionAlerts =
+      extractionMetricsCollector.generateExtractionAlerts();
+
+    // Build comprehensive response
+    const response = {
+      success: true,
+      timestamp: new Date().toISOString(),
+      extraction: {
+        overall: extractionMetrics.overall,
+        byProvider: extractionMetrics.byProvider,
+        byPattern: extractionMetrics.byPattern,
+        failurePatterns: extractionMetrics.failurePatterns,
+        recentFailures: extractionMetrics.recentFailures,
+        insights: extractionMetrics.insights,
+      },
+      validation: validationMetrics,
+      repair: repairMetrics,
+      alerts: {
+        extraction: extractionAlerts,
+        summary: {
+          total: extractionAlerts.length,
+          critical: extractionAlerts.filter((a) => a.severity === 'critical')
+            .length,
+          warning: extractionAlerts.filter((a) => a.severity === 'warning')
+            .length,
+          info: extractionAlerts.filter((a) => a.severity === 'info').length,
+        },
+      },
+      summary: {
+        extractionSuccessRate: extractionMetrics.overall.successRate,
+        validationSuccessRate: validationMetrics
+          ? validationMetrics.overall.successRate
+          : null,
+        repairSuccessRate: repairMetrics ? repairMetrics.successRate : null,
+        totalExtractionAttempts: extractionMetrics.overall.totalAttempts,
+        totalValidations: validationMetrics
+          ? validationMetrics.overall.totalValidations
+          : null,
+        totalRepairs: repairMetrics ? repairMetrics.total : null,
+        activeAlerts: extractionAlerts.length,
+        criticalAlerts: extractionAlerts.filter(
+          (a) => a.severity === 'critical'
+        ).length,
+      },
+    };
+
+    res.json(response);
+  } catch (error) {
+    logger.error('Failed to get extraction metrics', {
+      error: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve extraction metrics',
+      message: error.message,
+    });
+  }
+});
+
 // Enhanced status endpoint with ProviderManager integration
 app.get(
   '/status',
@@ -663,24 +816,17 @@ async function performFallbackHealthChecks(status) {
 // Main parse endpoint - dream text -> scene JSON
 app.post(
   '/parse',
+  requestValidator.parseRequestMiddleware(),
   asyncHandler(async (req, res, next) => {
     const startTime = Date.now();
     const { text, style = 'ethereal', options = {} } = req.body;
 
     logger.info('Dream parse request', {
       textLength: text?.length || 0,
+      validationPassed: req.validationMetadata?.validated || false,
       style,
       hasOptions: Object.keys(options).length > 0,
     });
-
-    // Basic validation (more complex checks happen downstream)
-    if (!text || typeof text !== 'string' || text.trim().length === 0) {
-      logger.warn('Invalid parse request: missing or empty text');
-      return res.status(400).json({
-        success: false,
-        error: 'Text is required',
-      });
-    }
 
     // Check cache first
     let cachedResponse = null;
@@ -726,8 +872,11 @@ app.post(
     }
 
     // Build prompt
-    const prompt = promptBuilder.buildDreamParsePrompt(text, style, options);
-
+    const prompt = await promptBuilder.buildDreamParsePrompt(
+      text,
+      style,
+      options
+    );
     let aiRaw = null;
     let source = null;
     let providerMetadata = null;
@@ -740,6 +889,7 @@ app.post(
             logger.info(`Generating dream with provider: ${providerName}`, {
               style,
               textLength: text.length,
+              context,
               attempt: context.attemptNumber || 1,
             });
 
@@ -757,10 +907,7 @@ app.post(
                   providerName,
                   'generateDream',
                   {
-                    model:
-                      providerName === 'cerebras'
-                        ? 'llama-4-maverick-17b'
-                        : 'gpt-4',
+                    model: providerName === 'cerebras' ? 'cerebras' : 'gpt-4',
                     temperature: options.temperature || 0.6,
                     maxTokens:
                       options.maxTokens ||
@@ -773,21 +920,76 @@ app.post(
                   providerName,
                   {
                     operation: 'generateDream',
-                    model:
-                      providerName === 'cerebras'
-                        ? 'llama-4-maverick-17b'
-                        : 'gpt-4',
+                    model: providerName === 'cerebras' ? 'cerebras' : 'gpt-4',
                     inputTokens: Math.ceil(prompt.length / 4), // Rough token estimate
                     style,
                   }
                 );
               }
+
               const response = await provider.generateDream(prompt, {
                 ...options,
                 streaming: options.streaming || false,
                 context: context,
               });
               const responseTime = Date.now() - providerStart;
+
+              // CRITICAL: Log raw provider response structure for debugging
+              logger.info('Raw provider response received', {
+                provider: providerName,
+                responseTime,
+                responseType: typeof response,
+                isNull: response === null,
+                isUndefined: response === undefined,
+                topLevelKeys:
+                  response && typeof response === 'object'
+                    ? Object.keys(response)
+                    : [],
+              });
+
+              // Log detailed response structure
+              if (response && typeof response === 'object') {
+                logger.debug('Provider response structure details', {
+                  provider: providerName,
+                  hasData: 'data' in response,
+                  hasContent: 'content' in response,
+                  hasChoices: 'choices' in response,
+                  hasMessage: 'message' in response,
+                  hasText: 'text' in response,
+                  hasId: 'id' in response,
+                  hasStructures: 'structures' in response,
+                  hasEntities: 'entities' in response,
+                });
+
+                // Log sample of response (first 500 chars)
+                try {
+                  const responseSample = JSON.stringify(response).substring(
+                    0,
+                    500
+                  );
+                  logger.debug('Provider response sample', {
+                    provider: providerName,
+                    sample:
+                      responseSample +
+                      (JSON.stringify(response).length > 500
+                        ? '...[truncated]'
+                        : ''),
+                  });
+                } catch (e) {
+                  logger.warn('Could not stringify response for logging', {
+                    provider: providerName,
+                    error: e.message,
+                  });
+                }
+              } else if (typeof response === 'string') {
+                logger.debug('Provider response is string', {
+                  provider: providerName,
+                  length: response.length,
+                  sample:
+                    response.substring(0, 500) +
+                    (response.length > 500 ? '...[truncated]' : ''),
+                });
+              }
 
               // End monitoring tracking with success
               if (app.aiTracking) {
@@ -829,14 +1031,70 @@ app.post(
                 }
               );
 
-              // Ensure we return consistent content format
-              const finalContent =
-                responseParser.extractContentSafely(response, providerName) ||
-                response;
+              // ============================================================
+              // CRITICAL ASYNC/AWAIT POINT #1: Content Extraction
+              // ============================================================
+              // This await is ESSENTIAL to prevent Promise leakage that causes 502 errors.
+              // The extractContentSafely method processes provider responses which may be
+              // JSON strings, objects, or nested structures. Without this await, the
+              // extractedContent variable would contain a pending Promise instead of the
+              // actual dream data, causing downstream processing to fail with empty objects.
+              //
+              // Why this matters:
+              // - Cerebras returns JSON strings that need parsing
+              // - The parser uses async operations internally
+              // - Missing await here = Promise { <pending> } in extractedContent
+              // - Result: ProviderManager returns {}, Express gets 502 error
+              const extractedContent =
+                await responseParser.extractContentSafely(
+                  response,
+                  providerName
+                );
+              logger.info(
+                '---------XXXXXXXXXXXXXXXXXXX--------extracted Content:',
+                extractedContent
+              );
+              // Track extraction success
+              if (app.aiTracking) {
+                app.aiTracking.recordExtraction(
+                  providerName,
+                  !!extractedContent,
+                  extractedContent ? null : 'No content extracted'
+                );
+              }
+
+              // ============================================================
+              // CRITICAL ASYNC/AWAIT POINT #2: Promise Resolution Safety Net
+              // ============================================================
+              // This await provides a safety net to catch any Promises that might have
+              // escaped the extraction process. The ensureResolved helper checks if the
+              // value is a Promise and awaits it if necessary, otherwise returns it as-is.
+              //
+              // Why this matters:
+              // - Defensive programming against async bugs
+              // - Handles edge cases where extraction returns a Promise
+              // - Guarantees finalContent is NEVER a Promise
+              // - Last line of defense before building the result object
+              const finalContent = await asyncHelpers.ensureResolved(
+                extractedContent || response
+              );
+
+              // Log value state for debugging Promise issues
+              logger.debug('Value state: finalContent', {
+                type: typeof finalContent,
+                isPromise: finalContent instanceof Promise,
+                isNull: finalContent === null,
+                isUndefined: finalContent === undefined,
+                constructor: finalContent?.constructor?.name,
+                provider: providerName,
+                responseTime,
+              });
+
               const finalContentLength =
                 typeof finalContent === 'string' ? finalContent.length : 0;
 
-              return {
+              // Build result object
+              const result = {
                 content: finalContent,
                 tokens: {
                   input: Math.ceil(prompt.length / 4),
@@ -847,6 +1105,35 @@ app.post(
                 responseTime,
                 context,
               };
+
+              // ============================================================
+              // CRITICAL VALIDATION POINT: Pre-Return Promise Check
+              // ============================================================
+              // This validation ensures the result object contains NO Promise values
+              // before returning to ProviderManager. This is our final checkpoint to
+              // prevent Promise leakage from reaching the Express response handler.
+              //
+              // Why this matters:
+              // - Catches any Promises that escaped earlier checks
+              // - Validates ALL fields in the result object, not just content
+              // - Throws immediately if Promise detected (fail-fast)
+              // - Prevents 502 errors by catching bugs at the source
+              //
+              // If this validation fails, it means there's a bug in the async handling
+              // above that needs to be fixed - the Promise should have been awaited.
+              try {
+                asyncHelpers.validateNoPromises(
+                  result,
+                  'operation result',
+                  app.aiTracking,
+                  providerName
+                );
+              } catch (promiseError) {
+                // Promise detected - this will be tracked in metrics
+                throw promiseError;
+              }
+
+              return result;
             } catch (error) {
               // End monitoring tracking with error
               if (app.aiTracking) {
@@ -902,8 +1189,82 @@ app.post(
           }
         );
 
+        // ============================================================
+        // CRITICAL VALIDATION POINT: Post-ProviderManager Promise Check
+        // ============================================================
+        // This validation runs AFTER ProviderManager.executeWithFallback returns.
+        // It's a safety net to catch any Promise leakage that might have escaped
+        // both the operation callback validation AND the ProviderManager's own
+        // validation. This is our last chance to catch the bug before the result
+        // reaches the Express response handler.
+        //
+        // Why this matters:
+        // - Double-checks that ProviderManager returned clean data
+        // - Catches bugs in ProviderManager's Promise handling
+        // - Provides detailed logging for debugging
+        // - Attempts recovery if Promise detected (see catch block)
+        //
+        // If this validation fails, it indicates a serious bug in either:
+        // 1. The operation callback (should have been caught earlier)
+        // 2. ProviderManager's result handling (needs investigation)
+        try {
+          asyncHelpers.validateNoPromises(result, 'providerManager result');
+          logger.debug('Value state: result.content', {
+            type: typeof result.content,
+            isPromise: result.content instanceof Promise,
+            isNull: result.content === null,
+            isUndefined: result.content === undefined,
+            constructor: result.content?.constructor?.name,
+            provider: result.provider,
+            responseTime: result.responseTime,
+          });
+        } catch (promiseError) {
+          logger.error('Promise detected in providerManager result', {
+            error: promiseError.message,
+            provider: result.provider,
+            resultKeys: Object.keys(result),
+            contentType: typeof result.content,
+            contentIsPromise: result.content instanceof Promise,
+          });
+
+          // Attempt to resolve the Promise if detected
+          if (result.content instanceof Promise) {
+            logger.warn(
+              'Attempting to resolve unresolved Promise in result.content'
+            );
+            try {
+              result.content = await result.content;
+              logger.info('Successfully resolved Promise in result.content', {
+                contentType: typeof result.content,
+                contentLength:
+                  typeof result.content === 'string'
+                    ? result.content.length
+                    : 0,
+              });
+            } catch (resolveError) {
+              logger.error('Failed to resolve Promise in result.content', {
+                error: resolveError.message,
+              });
+              throw new Error(
+                `Unresolved Promise in result.content: ${resolveError.message}`
+              );
+            }
+          } else {
+            // Re-throw if it's not a Promise we can resolve
+            throw promiseError;
+          }
+        }
+
         aiRaw = result.content;
         source = result.provider;
+
+        console.log(
+          'aiRaw:result.content \n',
+          aiRaw,
+          '\n source = result.provider \n',
+          source
+        );
+
         providerMetadata = {
           responseTime: result.responseTime,
           tokens: result.tokens,
@@ -920,17 +1281,66 @@ app.post(
       } catch (error) {
         logger.error('ProviderManager dream generation failed:', error.message);
 
-        // Return appropriate error response
-        return res.status(502).json({
-          success: false,
-          error: 'AI provider generation failed',
-          details: error.message,
-          fallback: true,
-          providerManager: {
-            used: true,
-            error: error.message,
-          },
-        });
+        // Use fallback handler instead of returning error
+        try {
+          // Track fallback usage
+          if (app.aiTracking) {
+            app.aiTracking.recordFallbackUsage(
+              source || 'unknown',
+              'Provider failure',
+              'local_generation'
+            );
+          }
+
+          const fallbackDream = await fallbackHandler.handleProviderFailure(
+            error,
+            { text, style, options }
+          );
+
+          logger.info('Fallback dream generated successfully', {
+            structureCount: fallbackDream.structures?.length || 0,
+            entityCount: fallbackDream.entities?.length || 0,
+          });
+
+          // Return fallback dream with success flag
+          return res.json({
+            success: true,
+            data: fallbackDream,
+            metadata: {
+              source: 'fallback',
+              fallbackReason: 'Provider failure',
+              originalError: error.message,
+              processingTimeMs: Date.now() - startTime,
+            },
+          });
+        } catch (fallbackError) {
+          logger.error(
+            'Fallback generation also failed:',
+            fallbackError.message
+          );
+
+          // Track 502 error
+          if (app.aiTracking) {
+            app.aiTracking.record502Error(
+              source || 'unknown',
+              'AI provider generation failed and fallback failed',
+              {
+                providerError: error.message,
+                fallbackError: fallbackError.message,
+              }
+            );
+          }
+
+          // Return error only if fallback also fails
+          return res.status(502).json({
+            success: false,
+            error: 'AI provider generation failed and fallback failed',
+            details: {
+              providerError: error.message,
+              fallbackError: fallbackError.message,
+            },
+          });
+        }
       }
     } else {
       // Fallback to legacy provider logic if ProviderManager not available
@@ -992,43 +1402,256 @@ app.post(
         }
       }
 
-      // If still nothing, return a failure
+      // If still nothing, use fallback handler
       if (!aiRaw) {
         logger.error('No AI providers available for dream generation', {
           cerebrasConfigured: !!process.env.CEREBRAS_API_KEY,
           openaiConfigured: !!process.env.OPENAI_API_KEY,
           providerManagerAvailable: false,
         });
+
+        try {
+          // Track fallback usage
+          if (app.aiTracking) {
+            app.aiTracking.recordFallbackUsage(
+              'none',
+              'No AI providers available',
+              'local_generation'
+            );
+          }
+
+          const fallbackDream = await fallbackHandler.handleProviderFailure(
+            new Error('No AI providers available'),
+            { text, style, options }
+          );
+
+          logger.info('Fallback dream generated (no providers available)', {
+            structureCount: fallbackDream.structures?.length || 0,
+            entityCount: fallbackDream.entities?.length || 0,
+          });
+
+          return res.json({
+            success: true,
+            data: fallbackDream,
+            metadata: {
+              source: 'fallback',
+              fallbackReason: 'No AI providers available',
+              processingTimeMs: Date.now() - startTime,
+            },
+          });
+        } catch (fallbackError) {
+          // Track 502 error
+          if (app.aiTracking) {
+            app.aiTracking.record502Error(
+              'none',
+              'No AI providers available and fallback failed',
+              {
+                fallbackError: fallbackError.message,
+              }
+            );
+          }
+
+          return res.status(502).json({
+            success: false,
+            error: 'No AI providers available and fallback failed',
+            details: fallbackError.message,
+          });
+        }
+      }
+    }
+
+    // Transform and validate response using enhanced transformer
+    // The transformer handles the complete pipeline: extraction, normalization, validation, and repair
+    // Pass the RAW response (aiRaw) not the parsed response to avoid double extraction
+    // Error handling distinguishes between:
+    // 1. Extraction failures (when extractDreamData returns null) - 502 with extraction details
+    // 2. Validation failures (when validation fails) - 502 with validation errors in shared format
+    // 3. Repair success (when repair fixes validation errors) - 200 with warnings
+    let transformedResponse;
+    let extractionFailed = false;
+    let validationFailed = false;
+    let extractionError = null;
+
+    try {
+      transformedResponse = await responseTransformer.transformResponse(
+        aiRaw,
+        source,
+        {
+          text,
+          style,
+          options,
+        }
+      );
+
+      logger.info('Response transformation completed', {
+        source,
+        validationPassed: transformedResponse.metadata?.validationPassed,
+        repairApplied: transformedResponse.metadata?.repairApplied,
+        structureCount: transformedResponse.data?.structures?.length || 0,
+        entityCount: transformedResponse.data?.entities?.length || 0,
+      });
+    } catch (transformError) {
+      logger.error('Response transformation failed', {
+        source,
+        error: transformError.message,
+        stack: transformError.stack,
+      });
+
+      // EMPTY RESPONSE: Return 502 with empty response error details
+      // This occurs when provider returns null, undefined, or empty object ({})
+      if (transformError.errorType === 'EMPTY_RESPONSE') {
+        extractionFailed = true;
+        extractionError = transformError;
+
+        // Build empty response error with error ID
+        const errorResponse = errorResponseBuilder.buildEmptyResponseError(
+          source,
+          aiRaw
+        );
+
+        logger.error('Empty response detected - returning 502', {
+          errorId: errorResponse.errorId,
+          provider: source,
+          responseType: typeof aiRaw,
+        });
+
+        // Track 502 error separately for empty responses
+        if (app.aiTracking) {
+          app.aiTracking.record502Error(
+            source,
+            'Empty response from provider',
+            {
+              errorId: errorResponse.errorId,
+              responseType: typeof aiRaw,
+            }
+          );
+        }
+
+        return res.status(502).json(errorResponse);
+      }
+
+      // EXTRACTION FAILURE: Return 502 with extraction error details
+      // This occurs when extractDreamData returns null (no pattern matched)
+      if (transformError.message.includes('Failed to extract dream data')) {
+        extractionFailed = true;
+        extractionError = transformError;
+
+        // Get extraction metrics from transformer
+        const extractionMetrics =
+          responseTransformer.contentExtractor.getExtractionMetrics();
+        const attemptedPatterns =
+          errorResponseBuilder.extractAttemptedPatterns(extractionMetrics);
+
+        // Build extraction error response with error ID
+        const errorResponse = errorResponseBuilder.buildExtractionErrorResponse(
+          source,
+          aiRaw,
+          attemptedPatterns
+        );
+
+        logger.error('Extraction failure detected - returning 502', {
+          errorId: errorResponse.errorId,
+          provider: source,
+          patternsAttempted: attemptedPatterns.length,
+        });
+
+        // Track 502 error
+        if (app.aiTracking) {
+          app.aiTracking.record502Error(
+            source,
+            'Extraction failure - no pattern matched',
+            {
+              errorId: errorResponse.errorId,
+              patternsAttempted: attemptedPatterns.length,
+            }
+          );
+        }
+
+        return res.status(502).json(errorResponse);
+      }
+
+      // For other transformation errors, try to use fallback handler
+      logger.warn('Transformation error, attempting fallback', {
+        source,
+        error: transformError.message,
+      });
+
+      try {
+        const fallbackDream = await fallbackHandler.handleProviderFailure(
+          transformError,
+          { text, style, options }
+        );
+
+        logger.info('Fallback dream generated (transformation failure)', {
+          structureCount: fallbackDream.structures?.length || 0,
+          entityCount: fallbackDream.entities?.length || 0,
+        });
+
+        return res.json({
+          success: true,
+          data: fallbackDream,
+          metadata: {
+            source: 'fallback',
+            fallbackReason: 'Transformation failure',
+            originalProvider: source,
+            processingTimeMs: Date.now() - startTime,
+          },
+        });
+      } catch (fallbackError) {
         return res.status(502).json({
           success: false,
-          error: 'No AI providers available',
-          fallback: true,
-          providerManager: {
-            used: false,
-            reason: 'not_initialized',
-          },
+          error: 'Failed to transform AI response and fallback failed',
+          details: transformError.message,
         });
       }
     }
 
-    // Parse AI response to scene JSON
-    const parsed = responseParser.parseDreamResponse(aiRaw, source);
+    // VALIDATION FAILURE: Return 502 with validation errors in shared format
+    // Validate before sending to Express service
+    const sendValidation =
+      responseTransformer.validateBeforeSending(transformedResponse);
 
-    if (!parsed) {
-      logger.error('Failed to parse AI response', {
+    if (!sendValidation.valid && process.env.STRICT_VALIDATION !== 'false') {
+      validationFailed = true;
+
+      logger.error('Response validation failed before sending', {
         source,
-        responseLength: aiRaw?.length || 0,
+        errorCount: sendValidation.errorCount,
+        errors: sendValidation.errors.slice(0, 5),
       });
-      return res.status(502).json({
-        success: false,
-        error: 'Failed to parse AI response',
-        fallback: true,
+
+      // Build validation error response using shared format with error ID
+      const errorResponse = errorResponseBuilder.buildValidationErrorResponse(
+        sendValidation,
+        source
+      );
+
+      logger.error('Validation failure detected - returning 502', {
+        errorId: errorResponse.errorId,
+        provider: source,
+        errorCount: errorResponse.errorCount,
+        criticalCount: errorResponse.criticalCount || 0,
       });
+
+      // Track 502 error
+      if (app.aiTracking) {
+        app.aiTracking.record502Error(source, 'Validation failure', {
+          errorId: errorResponse.errorId,
+          errorCount: errorResponse.errorCount,
+          criticalCount: errorResponse.criticalCount || 0,
+        });
+      }
+
+      return res.status(502).json(errorResponse);
     }
 
+    // Use transformed data for further processing
+    const finalParsed = transformedResponse.data;
+
     // Attach initial metadata with enhanced provider information
-    parsed.metadata = {
-      ...(parsed.metadata || {}),
+    finalParsed.metadata = {
+      ...(finalParsed.metadata || {}),
+      ...(transformedResponse.metadata || {}),
       generatedAt: new Date().toISOString(),
       source,
       processingTimeMs: Date.now() - startTime,
@@ -1048,7 +1671,7 @@ app.post(
     };
 
     // Enhanced validation and repair pipeline
-    let finalContent = parsed;
+    let finalContent = finalParsed;
     let validationResult = null;
     let repairResult = null;
 
@@ -1057,7 +1680,7 @@ app.post(
 
       // Run validation and repair pipeline
       const pipelineResult = await validationPipeline.validateAndRepair(
-        parsed,
+        finalParsed,
         'dreamResponse',
         {
           originalPrompt: text,
@@ -1127,6 +1750,22 @@ app.post(
       }
     }
 
+    // Final check: ensure response is complete before sending
+    try {
+      finalContent = await fallbackHandler.ensureCompleteResponse(
+        finalContent,
+        {
+          text,
+          style,
+          options,
+        }
+      );
+    } catch (ensureError) {
+      logger.error('Failed to ensure complete response', {
+        error: ensureError.message,
+      });
+    }
+
     logger.info('Dream parse completed', {
       source,
       processingTimeMs: totalTime,
@@ -1135,18 +1774,69 @@ app.post(
       validationApplied: !!validationResult,
       repairApplied: !!repairResult,
       cached: cacheService?.isAvailable() || false,
+      structureCount: finalContent.structures?.length || 0,
+      entityCount: finalContent.entities?.length || 0,
     });
 
-    res.json({
-      success: true,
-      data: finalContent,
-      metadata: {
+    // Build appropriate response based on whether repair was applied
+    let finalResponse;
+
+    // REPAIR SUCCESS: Return 200 with metadata when repair is successful
+    if (repairResult && repairResult.appliedStrategies?.length > 0) {
+      // Repair was applied - return 200 with warnings and metadata
+      const warnings = [];
+
+      if (validationResult?.errors?.length > 0) {
+        warnings.push({
+          type: 'VALIDATION_ERRORS_REPAIRED',
+          message: `${validationResult.errors.length} validation errors were automatically repaired`,
+          details: validationResult.errors.slice(0, 5), // Include first 5 errors
+        });
+      }
+
+      if (repairResult.remainingErrors?.length > 0) {
+        warnings.push({
+          type: 'PARTIAL_REPAIR',
+          message: `${repairResult.remainingErrors.length} errors could not be automatically repaired`,
+          details: repairResult.remainingErrors.slice(0, 3),
+        });
+      }
+
+      // Build success response with warnings using ErrorResponseBuilder
+      // Includes error ID for tracking and metadata about repair
+      finalResponse = errorResponseBuilder.buildSuccessWithWarningsResponse(
+        finalContent,
+        warnings,
+        {
+          source,
+          processingTimeMs: totalTime,
+          cacheHit: false,
+          validation: finalContent.metadata?.validation,
+          strategiesApplied: repairResult.appliedStrategies,
+          errorsRepaired:
+            (validationResult?.errors?.length || 0) -
+            (repairResult.remainingErrors?.length || 0),
+        },
+        source
+      );
+
+      logger.info('Returning success response with repair warnings', {
+        source,
+        warningCount: warnings.length,
+        strategiesApplied: repairResult.appliedStrategies.length,
+        errorId: finalResponse.metadata?.errorId,
+      });
+    } else {
+      // No repair needed - return standard success response
+      finalResponse = errorResponseBuilder.buildSuccessResponse(finalContent, {
         source,
         processingTimeMs: totalTime,
         cacheHit: false,
         validation: finalContent.metadata?.validation,
-      },
-    });
+      });
+    }
+
+    res.json(finalResponse);
   })
 );
 
@@ -1456,7 +2146,7 @@ app.post('/style-enrich', async (req, res, next) => {
 });
 
 // Fallback 404
-app.use('*', (req, res) => {
+app.use((req, res) => {
   res.status(404).json({
     error: 'Endpoint not found',
     available: [
@@ -1562,12 +2252,25 @@ const server = app.listen(PORT, async () => {
     // Make providerManager available to routes
     app.locals.providerManager = providerManager;
 
+    // Integrate extraction metrics collector with alerting system
+    if (providerManager && providerManager.alertingSystem) {
+      extractionMetricsCollector.setAlertingSystem(
+        providerManager.alertingSystem
+      );
+      logger.info(
+        '✅ ExtractionMetricsCollector integrated with AlertingSystem'
+      );
+    }
+
     logger.info('✅ Enhanced ProviderManager initialized successfully');
   } catch (error) {
     logger.error('❌ Failed to initialize ProviderManager:', error.message);
     logger.warn('Continuing with legacy provider logic');
     app.locals.providerManager = null;
   }
+
+  // Make extraction metrics collector available to routes
+  app.locals.extractionMetricsCollector = extractionMetricsCollector;
 
   // Initialize cache service after server starts
   await initializeCacheService();

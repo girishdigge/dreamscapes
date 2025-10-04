@@ -4,7 +4,7 @@
 const { logger, EnhancedLogger } = require('./Logger');
 
 class CacheManager {
-  constructor(responseCache) {
+  constructor(responseCache, config = {}) {
     this.cache = responseCache;
     this.invalidationRules = new Map();
     this.cleanupInterval = null;
@@ -16,6 +16,8 @@ class CacheManager {
       maxCacheAge: 24 * 60 * 60 * 1000, // 24 hours
       lowQualityTtl: 30 * 60, // 30 minutes for low quality
       feedbackThreshold: 0.3, // Invalidate if feedback score < 0.3
+      forceTestMode: config.forceTestMode || false,
+      ...config,
     };
 
     this.setupInvalidationRules();
@@ -338,6 +340,12 @@ class CacheManager {
 
   // Start background maintenance tasks
   startBackgroundTasks() {
+    // Skip background tasks in test environment
+    if (process.env.NODE_ENV === 'test' || this.config?.forceTestMode) {
+      logger.debug('Skipping background tasks in test mode');
+      return;
+    }
+
     // Cleanup task
     this.cleanupInterval = setInterval(async () => {
       await this.performSmartCleanup();

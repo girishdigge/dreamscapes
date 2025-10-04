@@ -56,6 +56,9 @@ module.exports = {
   // Transform configuration (if needed for ES modules)
   transform: {},
 
+  // Transform ignore patterns - don't transform node_modules except uuid
+  transformIgnorePatterns: ['node_modules/(?!uuid)'],
+
   // Module file extensions
   moduleFileExtensions: ['js', 'json', 'node'],
 

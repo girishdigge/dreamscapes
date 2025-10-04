@@ -1,0 +1,30 @@
+{
+  "name": "@dreamscapes/shared",
+  "version": "1.0.0",
+  "description": "Shared schemas and validators for Dreamscapes application",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest --runInBand",
+    "test:e2e": "jest __tests__/e2e-dream-generation.test.js --runInBand",
+    "test:error": "jest __tests__/error-handling-recovery.test.js --runInBand",
+    "test:unit": "jest __tests__/DreamSchema.test.js __tests__/UnifiedValidator.test.js --runInBand",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "uuid": "^13.0.0",
+    "winston": "^3.18.3"
+  },
+  "devDependencies": {
+    "axios": "^1.12.2",
+    "jest": "^30.2.0"
+  },
+  "keywords": [
+    "dreamscapes",
+    "validation",
+    "schema"
+  ],
+  "author": "",
+  "license": "ISC"
+}

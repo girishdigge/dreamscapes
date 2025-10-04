@@ -82,7 +82,7 @@ class ProviderRegistry {
             backoffMultiplier: 2,
           },
           sdk: {
-            model: 'llama-4-maverick-17b-128e-instruct',
+            model: 'llama-3.3-70b',
             streaming: true,
             maxTokens: 32768,
             temperature: 0.6,

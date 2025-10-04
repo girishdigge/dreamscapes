@@ -26,6 +26,17 @@ export default function DreamScene({
 }: DreamSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Debug logging
+  console.log('🎬 DreamScene render:', {
+    dreamId: dream?.id,
+    dreamStyle: dream?.style,
+    hasStructures: !!dream?.structures?.length,
+    hasEntities: !!dream?.entities?.length,
+    hasCinematography: !!dream?.cinematography,
+    isPlaying,
+    currentTime,
+  });
+
   // Canvas settings based on dream render config
   const renderConfig = dream.render || {
     res: [1280, 720],

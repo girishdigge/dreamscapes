@@ -1,116 +1,316 @@
-// utils/Logger.js
-// Enhanced logging system with structured data
+// services/mcp-gateway/utils/logger.js
+const fs = require('fs');
+const path = require('path');
 
-const winston = require('winston');
-
-// Create transports array based on environment
-const transports = [
-  new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-  new winston.transports.File({ filename: 'logs/combined.log' }),
-];
-
-// Add console transport for non-production environments
-if (process.env.NODE_ENV !== 'production') {
-  transports.push(
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      ),
-    })
-  );
-}
-
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  defaultMeta: { service: 'mcp-gateway' },
-  transports,
-});
-
-// Add close method for proper cleanup
-logger.close = function () {
-  if (this.transports) {
-    this.transports.forEach((transport) => {
-      if (transport.close && typeof transport.close === 'function') {
-        transport.close();
-      }
-    });
-  }
+// Log levels
+const LOG_LEVELS = {
+  ERROR: 0,
+  WARN: 1,
+  INFO: 2,
+  DEBUG: 3,
 };
 
-class EnhancedLogger {
-  static logProviderRequest(provider, prompt, options = {}) {
-    logger.info('Provider request', {
-      provider,
-      promptLength: prompt.length,
-      options,
-      timestamp: new Date().toISOString(),
-    });
+// Colors for console output
+const COLORS = {
+  ERROR: '\x1b[31m', // Red
+  WARN: '\x1b[33m', // Yellow
+  INFO: '\x1b[36m', // Cyan
+  DEBUG: '\x1b[37m', // White
+  RESET: '\x1b[0m',
+};
+
+class Logger {
+  constructor(options = {}) {
+    this.serviceName = options.serviceName || 'mcp-gateway';
+    this.level = LOG_LEVELS[options.level || process.env.LOG_LEVEL || 'INFO'];
+    this.enableColors = options.colors !== false;
+    this.enableConsole = options.console !== false;
+    this.enableFile = options.file !== false;
+    this.logDir = options.logDir || 'logs';
+    this.maxFileSize = options.maxFileSize || 10 * 1024 * 1024; // 10MB
+    this.maxFiles = options.maxFiles || 5;
+
+    // Ensure log directory exists
+    if (this.enableFile) {
+      this.ensureLogDir();
+    }
   }
 
-  static logProviderResponse(provider, success, responseTime, error = null) {
-    const logData = {
-      provider,
-      success,
-      responseTime,
-      timestamp: new Date().toISOString(),
+  ensureLogDir() {
+    if (!fs.existsSync(this.logDir)) {
+      fs.mkdirSync(this.logDir, { recursive: true });
+    }
+  }
+
+  formatMessage(level, message, meta = {}) {
+    const timestamp = new Date().toISOString();
+    const pid = process.pid;
+
+    const baseLog = {
+      timestamp,
+      level,
+      service: this.serviceName,
+      pid,
+      message: typeof message === 'string' ? message : JSON.stringify(message),
     };
 
-    if (error) {
-      logData.error = {
-        message: error.message,
-        type: error.type,
-        stack: error.stack,
-      };
+    // Add metadata if provided
+    if (Object.keys(meta).length > 0) {
+      baseLog.meta = meta;
     }
+
+    return baseLog;
+  }
+
+  formatConsoleMessage(logObj) {
+    const { timestamp, level, service, message, meta } = logObj;
+    const color = this.enableColors ? COLORS[level] : '';
+    const reset = this.enableColors ? COLORS.RESET : '';
+
+    let formatted = `${color}[${timestamp}] ${level.padEnd(
+      5
+    )} [${service}] ${message}${reset}`;
+
+    if (meta && Object.keys(meta).length > 0) {
+      formatted += `\n${JSON.stringify(meta, null, 2)}`;
+    }
+
+    return formatted;
+  }
+
+  log(level, message, meta = {}) {
+    if (LOG_LEVELS[level] > this.level) {
+      return; // Skip if level is below threshold
+    }
+
+    const logObj = this.formatMessage(level, message, meta);
+
+    // Console output
+    if (this.enableConsole) {
+      const consoleMsg = this.formatConsoleMessage(logObj);
+
+      if (level === 'ERROR') {
+        console.error(consoleMsg);
+      } else if (level === 'WARN') {
+        console.warn(consoleMsg);
+      } else {
+        console.log(consoleMsg);
+      }
+    }
+
+    // File output
+    if (this.enableFile) {
+      this.writeToFile(level, logObj);
+    }
+  }
+
+  writeToFile(level, logObj) {
+    const fileName = level === 'ERROR' ? 'error.log' : 'app.log';
+    const filePath = path.join(this.logDir, fileName);
+    const logLine = JSON.stringify(logObj) + '\n';
+
+    try {
+      // Check file size and rotate if needed
+      if (fs.existsSync(filePath)) {
+        const stats = fs.statSync(filePath);
+        if (stats.size > this.maxFileSize) {
+          this.rotateFile(filePath);
+        }
+      }
+
+      fs.appendFileSync(filePath, logLine);
+    } catch (error) {
+      console.error('Failed to write to log file:', error.message);
+    }
+  }
+
+  rotateFile(filePath) {
+    const dir = path.dirname(filePath);
+    const ext = path.extname(filePath);
+    const baseName = path.basename(filePath, ext);
+
+    // Rotate existing files
+    for (let i = this.maxFiles - 1; i > 0; i--) {
+      const oldFile = path.join(dir, `${baseName}.${i}${ext}`);
+      const newFile = path.join(dir, `${baseName}.${i + 1}${ext}`);
+
+      if (fs.existsSync(oldFile)) {
+        if (i === this.maxFiles - 1) {
+          fs.unlinkSync(oldFile); // Delete oldest
+        } else {
+          fs.renameSync(oldFile, newFile);
+        }
+      }
+    }
+
+    // Move current file to .1
+    const rotatedFile = path.join(dir, `${baseName}.1${ext}`);
+    fs.renameSync(filePath, rotatedFile);
+  }
+
+  error(message, meta = {}) {
+    this.log('ERROR', message, meta);
+  }
+
+  warn(message, meta = {}) {
+    this.log('WARN', message, meta);
+  }
+
+  info(message, meta = {}) {
+    this.log('INFO', message, meta);
+  }
+
+  debug(message, meta = {}) {
+    this.log('DEBUG', message, meta);
+  }
+
+  // HTTP request logging
+  logRequest(req, res, responseTime) {
+    const logData = {
+      method: req.method,
+      url: req.originalUrl,
+      statusCode: res.statusCode,
+      responseTime: responseTime + 'ms',
+      ip: req.ip || req.connection.remoteAddress,
+      userAgent: req.get('User-Agent'),
+      contentLength: res.get('Content-Length') || 0,
+    };
+
+    if (res.statusCode >= 400) {
+      this.warn('HTTP Request', logData);
+    } else {
+      this.info('HTTP Request', logData);
+    }
+  }
+
+  // AI service logging
+  logAIRequest(provider, operation, duration, success = true, meta = {}) {
+    const logData = {
+      provider,
+      operation,
+      duration: duration + 'ms',
+      success,
+      ...meta,
+    };
 
     if (success) {
-      logger.info('Provider response success', logData);
+      this.info(`AI ${operation}`, logData);
     } else {
-      logger.error('Provider response failed', logData);
+      this.error(`AI ${operation} failed`, logData);
     }
   }
 
-  static logProviderFallback(fromProvider, toProvider, reason) {
-    logger.warn('Provider fallback', {
-      fromProvider,
-      toProvider,
-      reason,
-      timestamp: new Date().toISOString(),
-    });
+  // Performance logging
+  logPerformance(operation, duration, meta = {}) {
+    const logData = {
+      operation,
+      duration: duration + 'ms',
+      ...meta,
+    };
+
+    if (duration > 5000) {
+      // > 5 seconds
+      this.warn('Slow Operation', logData);
+    } else {
+      this.debug('Performance', logData);
+    }
+  }
+}
+
+// Create default logger instance
+const logger = new Logger({
+  serviceName: 'mcp-gateway',
+  level: process.env.LOG_LEVEL || 'INFO',
+  colors: process.env.NODE_ENV !== 'production',
+  console: true,
+  file: process.env.NODE_ENV === 'production',
+});
+
+// Express middleware for request logging
+function requestLogger() {
+  return (req, res, next) => {
+    const start = Date.now();
+
+    // Override res.end to capture response time
+    const originalEnd = res.end;
+    res.end = function (chunk, encoding) {
+      const responseTime = Date.now() - start;
+      logger.logRequest(req, res, responseTime);
+      originalEnd.call(res, chunk, encoding);
+    };
+
+    next();
+  };
+}
+
+// Structured error logging
+function logError(error, context = {}) {
+  const errorData = {
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+    code: error.code,
+    ...context,
+  };
+
+  logger.error('Application Error', errorData);
+}
+
+/**
+ * Logs the type and state of a value for debugging async operations
+ * CRITICAL: Use this to detect unresolved Promises in the response pipeline
+ * @param {string} label - Label for the log entry
+ * @param {*} value - Value to inspect
+ * @param {Object} context - Additional context information
+ * @returns {Object} State information about the value
+ */
+function logValueState(label, value, context = {}) {
+  const state = {
+    label,
+    type: typeof value,
+    isPromise: value instanceof Promise,
+    isNull: value === null,
+    isUndefined: value === undefined,
+    constructor: value?.constructor?.name,
+    ...context,
+  };
+
+  // Add additional inspection for objects
+  if (value && typeof value === 'object' && !(value instanceof Promise)) {
+    state.keys = Object.keys(value).slice(0, 10); // First 10 keys
+    state.hasContent = !!value.content;
+    state.contentType = typeof value.content;
+    state.contentIsPromise = value.content instanceof Promise;
   }
 
-  static logValidationError(content, errors) {
-    logger.error('Validation failed', {
-      contentLength: content?.length || 0,
-      errors,
-      timestamp: new Date().toISOString(),
-    });
+  // Add string length for string values
+  if (typeof value === 'string') {
+    state.length = value.length;
+    state.preview = value.substring(0, 100); // First 100 chars
   }
 
-  static logCacheHit(key, provider) {
-    logger.debug('Cache hit', {
-      key: key.substring(0, 50) + '...',
-      provider,
-      timestamp: new Date().toISOString(),
-    });
+  // WARNING: Promise detected - this indicates a bug
+  if (value instanceof Promise) {
+    logger.warn(`⚠️  Promise detected: ${label}`, state);
+  } else if (
+    value &&
+    typeof value === 'object' &&
+    value.content instanceof Promise
+  ) {
+    // Check if nested content is a Promise
+    logger.warn(`⚠️  Promise detected in content field: ${label}`, state);
+  } else {
+    logger.debug(`Value state: ${label}`, state);
   }
 
-  static logCacheMiss(key, provider) {
-    logger.debug('Cache miss', {
-      key: key.substring(0, 50) + '...',
-      provider,
-      timestamp: new Date().toISOString(),
-    });
-  }
+  return state;
 }
 
 module.exports = {
   logger,
-  EnhancedLogger,
+  Logger,
+  requestLogger,
+  logError,
+  logValueState,
+  LOG_LEVELS,
 };

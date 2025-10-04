@@ -1,0 +1,439 @@
+# Dreamscapes — Project Reference & Handoff
+
+> Purpose: a single, detailed reference so an AI-assisted editor or maintainer can take over this project, run it locally, fix bugs, extend features, and maintain production deployments.
+
+---
+
+## Quick summary
+
+Dreamscapes is a multi-service project that converts textual dream descriptions into interactive 3D "dream films". It uses a Next.js frontend (Three.js/react-three-fiber), an Express orchestrator service, an MCP Gateway (Node) that talks to LLM/AI services, and a Python service (llama-stylist) that provides model-based style enrichment or local model endpoints.
+
+This document describes architecture, file layout, how to run, common problems and their fixes, important code-level details, conventions, debugging tips, and a prioritized handoff checklist.
+
+---
+
+## High-level architecture
+
+```
+[Browser]  <-->  [Next.js Frontend (3000)]  <-->  [Express Orchestrator (8000)]  <-->  [MCP Gateway (8080)]  <-->  [AI Services]
+                                                                    |
+                                                                    +--> [llama-stylist (Python) 8000]
+                                                                    +--> [OpenAI / remote APIs]
+                                                                    +--> [Cerebras (or other local AI adaptor)]
+```
+
+* **Frontend (`services/frontend/next-app`)**: Next.js app (app/ directory), React components using `@react-three/fiber`, `three`, and `@react-three/drei`. Tailwind used for styling. The frontend rewrites `/api/:path*` to `NEXT_PUBLIC_API_URL` in `next.config.js` when in dev.
+* **Express (`services/express`)**: Main orchestrator API exposing endpoints such as `/api/parse-dream`, `/api/patch-dream`, `/api/export`. Uses middlewares, logging utilities, and route modules.
+* **MCP Gateway (`services/mcp-gateway`)**: Gateway service that handles requests to external AI providers (OpenAI, Cerebras, LLAMA). Provides health & status checks and internal APIs used by express.
+* **Llama Stylist (`services/llama-stylist`)**: Python FastAPI/uvicorn service providing local model endpoints (or stubs).
+* **Docker Compose**: Orchestrates all services for local development.
+
+---
+
+## Repository layout (important paths)
+
+```
+/services
+  /frontend
+    /next-app
+      app/ (Next app dir)
+        components/
+          DreamScene.tsx
+          DreamStructures.tsx
+          DreamEntities.tsx
+          DreamEnvironment.tsx
+          CinematicCamera.tsx
+          LoadingFallback.tsx
+          DreamInput.tsx
+        globals.css
+        layout.tsx
+      package.json
+      next.config.ts
+      tailwind.config.js
+  /express
+    server.js
+    package.json
+    routes/
+      parse.js
+      patch.js
+      export.js
+      health.js
+    middleware/
+      errorHandler.js
+      validation.js
+      cache.js
+    utils/
+      logger.js
+      dreamValidator.js
+      fallbackGenerator.js
+  /mcp-gateway
+    index.js
+    services/
+      cerebrasService.js
+      openaiService.js
+      llamaService.js
+    package.json
+  /llama-stylist
+    app.py (FastAPI)
+    requirements.txt
+    Dockerfile
+docker-compose.yml
+README.md
+```
+
+> Note: file names above reflect the current working tree supplied. If your local clone differs, align the doc accordingly.
+
+---
+
+## Environment variables (example `.env`)
+
+Add these to the root `.env` or per-service `.env` files. Keep secrets out of VCS.
+
+```env
+# frontend
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_FRONTEND_URL=http://localhost:3000
+# express
+PORT=8000
+MCP_GATEWAY_URL=http://mcp-gateway:8080
+NODE_ENV=development
+LOG_LEVEL=DEBUG
+# mcp-gateway
+PORT=8080
+OPENAI_API_KEY=sk-xxx
+CEREBRAS_API_KEY=xxx
+LLAMA_URL=http://llama-stylist:8000
+# llama-stylist
+PORT=8000
+```
+
+---
+
+## How to run (development)
+
+### Prerequisites
+
+* Docker & Docker Compose (v2+)
+* Node.js (local development without Docker): v18+ recommended (project uses Node 22 in containers)
+* Python 3.11+ (for llama-stylist, if running locally)
+
+### Start all services with Docker Compose
+
+```bash
+# from repo root
+docker-compose up --build
+```
+
+Watch logs: `docker-compose logs -f frontend express mcp-gateway llama-stylist`
+
+### Start a single service locally (without Docker) — helpful for interactive debugging
+
+Frontend locally (fast dev cycle):
+
+```bash
+cd services/frontend/next-app
+npm install
+npm run dev
+```
+
+Express locally:
+
+```bash
+cd services/express
+npm install
+npm run dev    # uses nodemon
+```
+
+MCP Gateway locally:
+
+```bash
+cd services/mcp-gateway
+npm install
+node index.js
+```
+
+Llama stylist locally (python):
+
+```bash
+cd services/llama-stylist
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+```
+
+---
+
+## Key endpoints and flows
+
+**Frontend** has UI pages; for API calls it rewrites `/api/:path*` to `NEXT_PUBLIC_API_URL` (see `next.config.ts`). Typical flow:
+
+* UI -> `POST /api/parse-dream` -> Express API
+* Express -> talk to MCP Gateway (`MCP_GATEWAY_URL`) for AI steps
+* MCP Gateway -> llama-stylist or external provider
+
+**Express API** (server.js routes):
+
+* `POST /api/parse-dream` -> generate dream from text description
+* `POST /api/patch-dream` -> apply modifications to a dream
+* `POST /api/export` -> export a dream as video
+* `GET /api/dreams` -> list cached dreams
+* `GET /api/scene/:id` -> get single scene
+* Health: `GET /health` and `GET /health/detailed`
+
+**MCP Gateway**: provides internal routes used by Express for AI operations and health checks.
+
+**Llama-style**: endpoints used by MCP Gateway to do style enrichment or language model tasks.
+
+---
+
+## Known issues observed (and fixes applied or recommended)
+
+This list was derived from recent runs and logs.
+
+1. **`app.use() requires a middleware function` / `app.use(errorHandler)` error**
+
+   * **Cause:** The middleware file exports multiple named functions as an object (e.g. `module.exports = { errorHandler, asyncHandler, ... }`) but `server.js` imported the module as a whole (`const errorHandler = require('./middleware/errorHandler')`) and passed the entire object to `app.use`. Express expects a function.
+   * **Fix:** Import properly
+
+     ```js
+     // server.js
+     const { errorHandler } = require('./middleware/errorHandler');
+     app.use(errorHandler);
+     ```
+
+     *or* change the middleware file to `module.exports = errorHandler` (not recommended if multiple utilities are exported).
+
+2. **`logger.info is not a function`**
+
+   * **Cause:** `utils/logger.js` exports an object with keys (`{ logger, Logger, ... }`) but `server.js` does `const logger = require('./utils/logger')` and expects `logger.info`. That leads to `logger.info is not a function`.
+   * **Fix:** destructure on import or export the logger directly.
+
+     ```js
+     // server.js
+     const { logger } = require('./utils/logger');
+     // OR in logger.js: module.exports = logger; // to preserve existing uses
+     ```
+
+3. **`Cannot find module 'axios'` in mcp-gateway**
+
+   * **Cause:** Missing dependency in `package.json` or `node_modules` not installed inside container.
+   * **Fix:** `cd services/mcp-gateway && npm install axios` and rebuild container or ensure `package.json` lists axios.
+
+4. **Next.js — `Export Fog doesn't exist in @react-three/drei` / `Fog is not exported`**
+
+   * **Cause:** `@react-three/drei` does not export `Fog`. Fog is provided by `three` via `fog` / `fogExp2` primitives. Attempting to import `Fog` from `drei` fails.
+   * **Fix:** Update `DreamScene.tsx`:
+
+     ```diff
+     ```
+
+* import { Environment, Stars, Fog } from '@react-three/drei';
+
+- import { Environment, Stars } from '@react-three/drei';
+- import \* as THREE from 'three';
+
+* {dream.environment?.fog && (
+* \<Fog attach='fog' args={\[styleColors.fog, 20, 200]} density={dream.environment.fog} />
+* )}
+
+- {dream.environment?.fog && (
+- // For linear fog (near, far)
+- \<fog attach="fog" args={\[styleColors.fog, 20, 200]} />
+- // OR for exponential fog with density value
+- // \<fogExp2 attach="fog" args={\[styleColors.fog, dream.environment.fog]} />
+- )}
+
+  ```
+  ```
+
+5. **Missing `@react-three/drei` or `three` packages when building the frontend**
+
+   * **Cause:** Dependency not present in `package.json` or container image didn't install updated `node_modules`.
+   * **Fix:** In `services/frontend/next-app` run `npm install @react-three/drei @react-three/fiber three` and rebuild the frontend image: `docker-compose build frontend`.
+
+6. **Next config / experimental warnings**
+
+   * Next changed experimental flags across versions. Remove or update deprecated keys (e.g. `experimental.appDir` may be recognized differently by the Next version in the container). Use the Next docs and target the version pinned in `package.json`.
+
+7. **`Cannot find module './globals.css'` in Next frontend**
+
+   * **Cause:** file path mismatch or layout file expects `globals.css` in same folder. Confirm location `app/globals.css` exists and is included in Docker build context. Also ensure `next.config` or import path is correct: `import './globals.css';` (works for app dir).
+
+---
+
+## Recommended immediate fixes (short, actionable patches)
+
+1. **DreamScene.tsx** — fix Fog import and usage (see code above).
+2. **server.js imports** — ensure proper destructuring of utility modules:
+
+   ```js
+   // server.js
+   const { logger } = require('./utils/logger');
+   const { errorHandler } = require('./middleware/errorHandler');
+   ```
+3. **mcp-gateway** — add `axios` to dependencies if its services use it, then `npm install` and rebuild the image.
+4. **Frontend deps** — ensure `@react-three/fiber`, `@react-three/drei` and `three` are in `package.json`; run `npm install` and rebuild.
+5. **docker-compose.yml** — remove obsolete `version:` attribute (compose v2+ warns it's obsolete).
+
+---
+
+## Style & coding conventions
+
+* **JS/Node**: CommonJS `require/module.exports` is used across backend code. Keep consistent.
+* **TypeScript**: Frontend uses `.tsx` with `use client` directive for client components. Prefer typed props when adding new components.
+* **Formatting**: Prettier/ESLint recommended. Add CI lint step.
+* **Logging**: Use `utils/logger.js` to log structured JSON-like objects. Keep consistent shape: `{ timestamp, level, pid, message, meta }`.
+
+---
+
+## Testing
+
+* Unit tests (express) live under `/services/express/tests`. Use `jest` or `mocha` + `supertest` to test routes.
+* Example: `npm run test` in `services/express` (add script if missing).
+* E2E: Use Cypress or Playwright. Run against a running docker-compose stack.
+
+---
+
+## Debugging tips & useful commands
+
+* Tail logs for a service:
+
+```bash
+docker-compose logs -f express
+```
+
+* Exec into running container:
+
+```bash
+docker-compose exec express sh
+# or
+docker exec -it dreamscapes-express-1 sh
+```
+
+* Rebuild a single service and run:
+
+```bash
+docker-compose build frontend && docker-compose up frontend
+```
+
+* Recreate containers (stop, remove and rebuild):
+
+```bash
+docker-compose down --volumes --remove-orphans
+docker-compose up --build
+```
+
+* Confirm Node package issues by shelling into container and running `node -e "console.log(require.resolve('axios'))"` or run `npm list`.
+
+---
+
+## Security & secrets
+
+* **Never** commit API keys to the repository. Use environment variables or a secret manager.
+* Use `.env.example` in repo to enumerate required variables.
+
+---
+
+## CI / CD suggestions
+
+* Add GitHub Actions pipeline:
+
+  * `lint` step (eslint + prettier)
+  * `unit test` step
+  * `build` step for frontend image (cache dependencies) and backend tests
+  * `security scan` (npm audit, Snyk)
+* Tag images and push to a container registry in release workflow.
+
+---
+
+## Handoff checklist for the AI agent
+
+1. **Sanity checks**
+
+   * Clone repository and run `npm ci` / `pip install -r` locally for each service.
+   * `docker-compose up --build` — ensure all services boot.
+2. **Fix immediate runtime errors** (priority order)
+
+   * `DreamScene.tsx` — Fog import & usage.
+   * `server.js` — ensure `logger` and `errorHandler` are functions by importing correct properties.
+   * `mcp-gateway` — ensure `axios` and other external deps exist.
+   * Frontend — install missing three-related packages and rebuild.
+3. **Run tests** — execute express tests and any integration tests.
+4. **Add linters and formatters** if not present.
+5. **Add monitoring / health checks** for AI dependencies.
+6. **Document remaining TODOs** in README and create issues for larger improvements (e.g., persistent task queue for exports, better export formats, streaming responses).
+
+---
+
+## Maintenance notes & future improvements
+
+* Improve error handling in Express for transient AI failures (retry, circuit breaking).
+* Add caching for repeated prompts and model outputs.
+* Introduce a simple API rate limiter to protect AI credits.
+* Provide a local dev `make` or `just` file with common commands.
+* Consolidate logger exports to avoid destructuring confusion.
+
+---
+
+## Useful snippets (copy/paste patches)
+
+**1) Fix `server.js` imports**
+
+```diff
+- const logger = require('./utils/logger');
+- const errorHandler = require('./middleware/errorHandler');
++ const { logger } = require('./utils/logger');
++ const { errorHandler } = require('./middleware/errorHandler');
+```
+
+**2) Fix `DreamScene.tsx` fog usage**
+
+```diff
+- import { Environment, Stars, Fog } from '@react-three/drei';
++ import { Environment, Stars } from '@react-three/drei';
++ // three primitives (fog, fogExp2) are available via react-three-fiber tags
+
+- {dream.environment?.fog && (
+-   <Fog attach='fog' args={[styleColors.fog, 20, 200]} density={dream.environment.fog} />
+- )}
++ {dream.environment?.fog && (
++   // Use linear fog (near, far) or exponential fogExp2 with density
++   // <fog attach="fog" args={[styleColors.fog, 20, 200]} />
++   <fogExp2 attach="fog" args={[styleColors.fog, dream.environment.fog]} />
++ )}
+```
+
+**3) Add axios to MCP Gateway `package.json`**
+
+```bash
+cd services/mcp-gateway
+npm install axios
+# Rebuild container
+docker-compose build mcp-gateway
+```
+
+---
+
+## Contact / ownership & governance
+
+* Primary maintainer: (fill in with your name/email)
+* Suggested Code owners: backend (`/services/express`), gateway (`/services/mcp-gateway`), frontend (`/services/frontend/next-app`)
+* Add a `CODEOWNERS` file if repo is shared.
+
+---
+
+## Final notes
+
+This document is intended to be the single source of truth for onboarding an automated or human maintainer. If you want, I can:
+
+* produce a `README.md` that is trimmed for developer onboarding (with run & debug commands),
+* create GitHub Actions CI templates,
+* prepare small PR patches for the immediate fixes (DreamScene + server imports + mcp-gateway deps), or
+* generate unit test skeletons for `express` routes.
+
+Pick one next step and I’ll prepare it (e.g., create PR patches for the 3 immediate fixes).
+
+---
+
+*End of document.*

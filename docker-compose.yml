@@ -43,25 +43,48 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  # MCP Gateway - proxy to external APIs
+  # MCP Gateway - Enhanced AI provider proxy with Cerebras SDK
   mcp-gateway:
     build:
-      context: ./services/mcp-gateway
+      context: .
+      dockerfile: ./services/mcp-gateway/Dockerfile
       target: development # Default to development, override in prod
+    volumes:
+      - ./shared:/app/shared:ro
     ports:
       - '8080:8080'
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - PORT=8080
+      # Enhanced Cerebras Configuration
       - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
-      - CEREBRAS_API_URL=${CEREBRAS_API_URL:-https://api.cerebras.ai/v1/chat/completions}
+      - CEREBRAS_API_URL=${CEREBRAS_API_URL:-https://api.cerebras.ai/v1}
+      - CEREBRAS_MODEL=${CEREBRAS_MODEL:-llama-3.3-70b}
+      - CEREBRAS_TEMPERATURE=${CEREBRAS_TEMPERATURE:-0.6}
+      - CEREBRAS_TOP_P=${CEREBRAS_TOP_P:-0.9}
+      - CEREBRAS_MAX_TOKENS=${CEREBRAS_MAX_TOKENS:-32768}
+      - CEREBRAS_STREAM=${CEREBRAS_STREAM:-true}
+      # Provider Configuration
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4}
       - LLAMA_URL=http://llama-stylist:8000
       - RENDER_WORKER_URL=http://render-worker:8001
+      # Enhanced Caching Configuration
       - REDIS_URL=redis://redis:6379
       - CACHE_DEFAULT_TTL=${CACHE_DEFAULT_TTL:-3600}
       - CACHE_MAX_SIZE=${CACHE_MAX_SIZE:-10000}
       - CACHE_ENABLE_SEMANTIC_SIMILARITY=${CACHE_ENABLE_SEMANTIC_SIMILARITY:-true}
+      - CACHE_QUALITY_THRESHOLD=${CACHE_QUALITY_THRESHOLD:-0.8}
+      # Provider Management
+      - PROVIDER_FALLBACK_ENABLED=${PROVIDER_FALLBACK_ENABLED:-true}
+      - PROVIDER_RETRY_ATTEMPTS=${PROVIDER_RETRY_ATTEMPTS:-3}
+      - PROVIDER_RETRY_DELAY=${PROVIDER_RETRY_DELAY:-1000}
+      - PROVIDER_TIMEOUT=${PROVIDER_TIMEOUT:-30000}
+      - PROVIDER_CIRCUIT_BREAKER_THRESHOLD=${PROVIDER_CIRCUIT_BREAKER_THRESHOLD:-5}
+      # Monitoring and Metrics
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      - METRICS_INTERVAL=${METRICS_INTERVAL:-60000}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     depends_on:
       llama-stylist:
         condition: service_healthy
@@ -69,6 +92,14 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
     healthcheck:
       test:
         [
@@ -86,8 +117,11 @@ services:
   # Express orchestrator - main API
   express:
     build:
-      context: ./services/express
+      context: .
+      dockerfile: ./services/express/Dockerfile
       target: development # Default to development, override in prod
+    volumes:
+      - ./shared:/app/shared:ro
     ports:
       - '8000:8000'
     environment:
@@ -146,14 +180,24 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  # Redis for enhanced caching system
+  # Redis for enhanced caching system with AI provider optimization
   redis:
     image: redis:7-alpine
     ports:
       - '6379:6379'
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAX_MEMORY:-512mb} --maxmemory-policy allkeys-lru --save 60 1000
     volumes:
       - redis_data:/data
+    environment:
+      - REDIS_REPLICATION_MODE=master
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 30s

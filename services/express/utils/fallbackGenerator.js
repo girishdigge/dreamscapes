@@ -1,5 +1,7 @@
 // services/express/utils/fallbackGenerator.js
 const { v4: uuidv4 } = require('uuid');
+const EnumMapper = require('../../../shared/validators/EnumMapper');
+const ParameterValidator = require('../../../shared/validators/ParameterValidator');
 
 // Style-specific configurations
 const STYLE_CONFIGS = {
@@ -179,6 +181,7 @@ function createFallbackDream(text, style = 'ethereal', options = {}) {
     id: dreamId,
     title,
     style,
+    source: 'express', // Required by schema
     seed: Math.floor(Math.random() * 1000000),
     environment: { ...config.environment },
     structures: generateStructures(detectedStructures, style, options),
@@ -269,7 +272,7 @@ function generateStructures(detectedTypes, style, options) {
 
     structures.push({
       id: `s${index + 1}`,
-      template: template.template,
+      type: template.template, // Changed from 'template' to 'type' to match schema
       pos: [
         Math.cos(angle) * distance,
         10 + Math.random() * 20,
@@ -285,7 +288,7 @@ function generateStructures(detectedTypes, style, options) {
   if (structures.length === 0) {
     structures.push({
       id: 's1',
-      template: 'floating_library',
+      type: 'floating_library', // Changed from 'template' to 'type'
       pos: [0, 20, 0],
       scale: 1.0,
       features: ['infinite_stair'],
@@ -302,14 +305,49 @@ function generateEntities(detectedTypes, style, options) {
   detectedTypes.forEach((type, index) => {
     const count = calculateEntityCount(type, style, options);
 
+    // Calculate raw parameter values
+    const rawSpeed = config.entityDefaults.speed * (0.7 + Math.random() * 0.6);
+    const rawGlow = config.entityDefaults.glow * (0.8 + Math.random() * 0.4);
+    const rawSize = 1.0 * (0.8 + Math.random() * 0.4);
+
+    // Get constraints and validate/clamp parameters
+    const speedConstraints = ParameterValidator.getParameterConstraints(
+      type,
+      'speed'
+    );
+    const glowConstraints = ParameterValidator.getParameterConstraints(
+      type,
+      'glow'
+    );
+    const sizeConstraints = ParameterValidator.getParameterConstraints(
+      type,
+      'size'
+    );
+
+    const speedResult = ParameterValidator.validateAndClamp(
+      'speed',
+      rawSpeed,
+      speedConstraints
+    );
+    const glowResult = ParameterValidator.validateAndClamp(
+      'glow',
+      rawGlow,
+      glowConstraints
+    );
+    const sizeResult = ParameterValidator.validateAndClamp(
+      'size',
+      rawSize,
+      sizeConstraints
+    );
+
     entities.push({
       id: `e${index + 1}`,
       type,
       count,
       params: {
-        speed: config.entityDefaults.speed * (0.7 + Math.random() * 0.6),
-        glow: config.entityDefaults.glow * (0.8 + Math.random() * 0.4),
-        size: 1.0 * (0.8 + Math.random() * 0.4),
+        speed: speedResult.value,
+        glow: glowResult.value,
+        size: sizeResult.value,
         color: config.entityDefaults.color,
       },
     });
@@ -317,14 +355,44 @@ function generateEntities(detectedTypes, style, options) {
 
   // Ensure at least one entity
   if (entities.length === 0) {
+    const defaultType = 'book_swarm';
+    const speedConstraints = ParameterValidator.getParameterConstraints(
+      defaultType,
+      'speed'
+    );
+    const glowConstraints = ParameterValidator.getParameterConstraints(
+      defaultType,
+      'glow'
+    );
+    const sizeConstraints = ParameterValidator.getParameterConstraints(
+      defaultType,
+      'size'
+    );
+
+    const speedResult = ParameterValidator.validateAndClamp(
+      'speed',
+      config.entityDefaults.speed,
+      speedConstraints
+    );
+    const glowResult = ParameterValidator.validateAndClamp(
+      'glow',
+      config.entityDefaults.glow,
+      glowConstraints
+    );
+    const sizeResult = ParameterValidator.validateAndClamp(
+      'size',
+      1.0,
+      sizeConstraints
+    );
+
     entities.push({
       id: 'e1',
-      type: 'book_swarm',
+      type: defaultType,
       count: 25,
       params: {
-        speed: config.entityDefaults.speed,
-        glow: config.entityDefaults.glow,
-        size: 1.0,
+        speed: speedResult.value,
+        glow: glowResult.value,
+        size: sizeResult.value,
         color: config.entityDefaults.color,
       },
     });
@@ -370,7 +438,7 @@ function generateCinematography(style, options) {
   if (duration <= 20) {
     // Short sequence - single shot
     shots.push({
-      type: 'establish',
+      type: EnumMapper.mapShotType('establish'),
       target: 's1',
       duration: duration,
       startPos: config.cameraDefaults.startPos,
@@ -382,7 +450,7 @@ function generateCinematography(style, options) {
     const flythroughDuration = duration - establishDuration;
 
     shots.push({
-      type: 'establish',
+      type: EnumMapper.mapShotType('establish'),
       target: 's1',
       duration: establishDuration,
       startPos: config.cameraDefaults.startPos,
@@ -390,7 +458,7 @@ function generateCinematography(style, options) {
     });
 
     shots.push({
-      type: 'flythrough',
+      type: EnumMapper.mapShotType('flythrough'),
       target: 'e1',
       duration: flythroughDuration,
       startPos: [0, 25, 20],
@@ -403,7 +471,7 @@ function generateCinematography(style, options) {
     const closeupDuration = duration - establishDuration - orbitDuration;
 
     shots.push({
-      type: 'establish',
+      type: EnumMapper.mapShotType('establish'),
       target: 's1',
       duration: establishDuration,
       startPos: config.cameraDefaults.startPos,
@@ -411,13 +479,13 @@ function generateCinematography(style, options) {
     });
 
     shots.push({
-      type: 'orbit',
+      type: EnumMapper.mapShotType('orbit'),
       target: 's1',
       duration: orbitDuration,
     });
 
     shots.push({
-      type: 'close_up',
+      type: EnumMapper.mapShotType('close_up'),
       target: 'e1',
       duration: closeupDuration,
     });
@@ -486,10 +554,43 @@ function generateAssumptions(text, style, structures, entities) {
 
 // Create emergency dream for critical failures
 function createEmergencyDream(originalText = 'Emergency dream') {
+  const entityType = 'floating_orbs';
+
+  // Validate and clamp parameters
+  const speedConstraints = ParameterValidator.getParameterConstraints(
+    entityType,
+    'speed'
+  );
+  const glowConstraints = ParameterValidator.getParameterConstraints(
+    entityType,
+    'glow'
+  );
+  const sizeConstraints = ParameterValidator.getParameterConstraints(
+    entityType,
+    'size'
+  );
+
+  const speedResult = ParameterValidator.validateAndClamp(
+    'speed',
+    1.0,
+    speedConstraints
+  );
+  const glowResult = ParameterValidator.validateAndClamp(
+    'glow',
+    0.5,
+    glowConstraints
+  );
+  const sizeResult = ParameterValidator.validateAndClamp(
+    'size',
+    1.0,
+    sizeConstraints
+  );
+
   return {
-    id: 'emergency_' + Date.now(),
+    id: uuidv4(),
     title: 'Emergency Dream Scene',
     style: 'ethereal',
+    source: 'express', // Required by schema
     seed: 12345,
     environment: {
       preset: 'dusk',
@@ -500,7 +601,7 @@ function createEmergencyDream(originalText = 'Emergency dream') {
     structures: [
       {
         id: 'emergency_structure',
-        template: 'floating_library',
+        type: 'floating_library', // Changed from 'template' to 'type'
         pos: [0, 20, 0],
         scale: 1.0,
         features: [],
@@ -509,12 +610,12 @@ function createEmergencyDream(originalText = 'Emergency dream') {
     entities: [
       {
         id: 'emergency_entity',
-        type: 'floating_orbs',
+        type: entityType,
         count: 10,
         params: {
-          speed: 1.0,
-          glow: 0.5,
-          size: 1.0,
+          speed: speedResult.value,
+          glow: glowResult.value,
+          size: sizeResult.value,
           color: '#ffffff',
         },
       },
@@ -523,7 +624,7 @@ function createEmergencyDream(originalText = 'Emergency dream') {
       durationSec: 20,
       shots: [
         {
-          type: 'establish',
+          type: EnumMapper.mapShotType('establish'),
           target: 'emergency_structure',
           duration: 20,
           startPos: [0, 30, 50],

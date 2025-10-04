@@ -6,7 +6,7 @@ const { EnhancedLoadBalancer } = require('./ProviderSelector');
 const ProviderPreferenceManager = require('./ProviderPreferenceManager');
 const IntelligentRetrySystem = require('../utils/IntelligentRetrySystem');
 const EnhancedCircuitBreaker = require('./EnhancedCircuitBreaker');
-
+const { logger, requestLogger } = require('../utils/logger');
 /**
  * Provider Manager - Centralized management of all AI providers
  * Handles provider selection, load balancing, fallback logic, and health monitoring
@@ -83,8 +83,8 @@ class ProviderManager extends EventEmitter {
       console.log('Enhanced monitoring disabled');
       return;
     }
-
     try {
+      app.use(requestLogger());
       // Initialize HealthMonitor
       const HealthMonitor = require('../monitoring/HealthMonitor');
       this.healthMonitor = new HealthMonitor({
@@ -299,11 +299,29 @@ class ProviderManager extends EventEmitter {
    * @returns {Promise<Object>} Selected provider info
    */
   async selectProvider(requirements = {}) {
-    const availableProviders =
+    // First try to get healthy providers
+    let availableProviders =
       this.getAvailableProvidersWithPreferences(requirements);
 
+    // If no healthy providers available, implement fallback mechanism
     if (availableProviders.length === 0) {
-      throw new Error('No healthy providers available');
+      console.log(
+        'No healthy providers available, attempting fallback to unhealthy providers'
+      );
+
+      // Try with unhealthy providers as fallback
+      availableProviders = this.getAvailableProvidersWithPreferences({
+        ...requirements,
+        allowUnhealthy: true,
+      });
+
+      if (availableProviders.length === 0) {
+        throw new Error('No providers available for fallback');
+      }
+
+      console.log(
+        `Fallback activated: ${availableProviders.length} providers available`
+      );
     }
 
     // Use enhanced load balancer to select best provider
@@ -312,10 +330,13 @@ class ProviderManager extends EventEmitter {
       requirements
     );
 
+    const isHealthy = selected.isHealthy !== false;
+    const fallbackUsed = !isHealthy;
+
     console.log(
       `Provider selected: ${selected.name} (score: ${
         selected.selectionMetadata?.score || 'N/A'
-      })`
+      }, healthy: ${isHealthy}, fallback: ${fallbackUsed})`
     );
 
     this.emit('providerSelected', {
@@ -324,14 +345,34 @@ class ProviderManager extends EventEmitter {
       score: selected.selectionMetadata?.score,
       strategy: selected.selectionMetadata?.strategy,
       metadata: selected.selectionMetadata,
+      fallbackUsed,
+      isHealthy,
     });
+
+    // Ensure proper provider identification and metadata
+    const providerInstance = this.providers.get(selected.name);
+    const providerConfig = this.providerConfigs.get(selected.name);
 
     return {
       name: selected.name,
-      provider: this.providers.get(selected.name),
-      config: this.providerConfigs.get(selected.name),
-      score: selected.selectionMetadata?.score,
-      selectionMetadata: selected.selectionMetadata,
+      provider: providerInstance,
+      config: providerConfig,
+      score: selected.selectionMetadata?.score || selected.score || 0,
+      selectionMetadata: {
+        ...selected.selectionMetadata,
+        providerId: selected.name,
+        providerType: providerInstance?.constructor?.name || 'Unknown',
+        configSource: providerConfig ? 'configured' : 'default',
+        selectionTimestamp: Date.now(),
+        healthStatus: selected.health || 'unknown',
+        fallbackUsed,
+        isHealthy,
+      },
+      // Additional provider identification
+      source: selected.name,
+      type: providerInstance?.constructor?.name || 'Unknown',
+      isHealthy: isHealthy,
+      capabilities: providerConfig?.capabilities || [],
     };
   }
 
@@ -404,6 +445,16 @@ class ProviderManager extends EventEmitter {
     // Track retry attempts per provider for better fallback logic
     const providerRetryCount = new Map();
 
+    // Enhanced fallback metadata tracking
+    const fallbackMetadata = {
+      startTime: startTime,
+      totalProviders: providerList.length,
+      attemptedProviders: [],
+      fallbackReason: null,
+      recoveryStrategy: options.recoveryStrategy || 'automatic',
+      providerSwitches: 0,
+    };
+
     for (const providerInfo of providerList) {
       const { name: providerName, maxRetries = 3 } = providerInfo;
 
@@ -429,6 +480,31 @@ class ProviderManager extends EventEmitter {
           (providerRetryCount.get(providerName) || 0) + 1
         );
         const attemptStartTime = Date.now();
+
+        // Track provider attempt in fallback metadata
+        if (
+          !fallbackMetadata.attemptedProviders.find(
+            (p) => p.name === providerName
+          )
+        ) {
+          fallbackMetadata.attemptedProviders.push({
+            name: providerName,
+            firstAttemptTime: attemptStartTime,
+            attempts: 0,
+            errors: [],
+          });
+          if (fallbackMetadata.attemptedProviders.length > 1) {
+            fallbackMetadata.providerSwitches++;
+            fallbackMetadata.fallbackReason = lastError
+              ? this.classifyError(lastError)
+              : 'provider_unavailable';
+          }
+        }
+
+        const providerAttempt = fallbackMetadata.attemptedProviders.find(
+          (p) => p.name === providerName
+        );
+        providerAttempt.attempts++;
 
         // Preserve context for provider switching
         const enhancedContext = contextPreservation
@@ -478,6 +554,47 @@ class ProviderManager extends EventEmitter {
 
           const responseTime = Date.now() - attemptStartTime;
 
+          // ============================================================
+          // CRITICAL VALIDATION: Promise Detection in Operation Result
+          // ============================================================
+          // This validation loop inspects EVERY field in the result object to ensure
+          // none of them contain unresolved Promises. This is a critical safety check
+          // that prevents Promise leakage from reaching the caller (index.js).
+          //
+          // Why this matters:
+          // - The operation callback (in index.js) should have awaited all async operations
+          // - If a Promise is found here, it indicates a bug in the operation callback
+          // - Without this check, the Promise would propagate to Express, causing 502 errors
+          // - This is our last line of defense before returning to the caller
+          //
+          // Common scenarios this catches:
+          // 1. Missing await on responseParser.extractContentSafely()
+          // 2. Missing await on asyncHelpers.ensureResolved()
+          // 3. Accidentally returning a Promise in any result field
+          //
+          // If this validation fails:
+          // - We throw immediately with detailed context (provider, field, attempt)
+          // - The error includes the field name that contains the Promise
+          // - This helps developers quickly identify which await is missing
+          // - The operation will retry with the next provider or fail gracefully
+          if (result && typeof result === 'object') {
+            for (const [key, value] of Object.entries(result)) {
+              if (value instanceof Promise) {
+                logger.error('Promise detected in operation result', {
+                  provider: providerName,
+                  field: key,
+                  attemptNumber: attemptCount,
+                  providerRetry: providerRetries + 1,
+                  responseTime,
+                });
+                throw new Error(
+                  `Operation result contains unresolved Promise in field: ${key}. ` +
+                    `Provider: ${providerName}, Attempt: ${attemptCount}`
+                );
+              }
+            }
+          }
+
           // Update metrics for success
           this.updateProviderMetrics(providerName, true, responseTime);
           circuitBreaker.recordSuccess();
@@ -509,6 +626,15 @@ class ProviderManager extends EventEmitter {
             requestId,
           });
 
+          // Log result state for debugging
+          logger.info('Provider Manager Result validated:', {
+            provider: providerName,
+            hasContent: !!result.content,
+            contentType: typeof result.content,
+            contentIsPromise: result.content instanceof Promise,
+            responseTime,
+          });
+
           return result;
         } catch (error) {
           const responseTime = Date.now() - attemptStartTime;
@@ -522,6 +648,21 @@ class ProviderManager extends EventEmitter {
             providerName,
             providerRetries
           );
+
+          // Track error in fallback metadata
+          const providerAttempt = fallbackMetadata.attemptedProviders.find(
+            (p) => p.name === providerName
+          );
+          if (providerAttempt) {
+            providerAttempt.errors.push({
+              type: errorType,
+              severity: errorSeverity,
+              message: error.message,
+              timestamp: Date.now(),
+              responseTime: responseTime,
+              retryable: isRetryable,
+            });
+          }
 
           // Update metrics for failure
           this.updateProviderMetrics(
@@ -625,6 +766,253 @@ class ProviderManager extends EventEmitter {
         failureReport.summary
       }. Last error: ${lastError?.message || 'Unknown error'}`
     );
+  }
+
+  /**
+   * Enhanced fallback provider selection with intelligent ordering
+   * @param {Array} excludeProviders - Providers to exclude from fallback
+   * @param {Object} options - Fallback options
+   * @returns {Array} Ordered list of fallback providers
+   * @private
+   */
+  getFallbackProviders(excludeProviders = [], options = {}) {
+    const allProviders = Array.from(this.providers.keys());
+    const availableForFallback = allProviders.filter(
+      (name) => !excludeProviders.includes(name)
+    );
+
+    // Get provider metadata for intelligent ordering
+    const providersWithMetadata = availableForFallback.map((name) => {
+      const config = this.providerConfigs.get(name);
+      const health = this.healthStatus.get(name);
+      const metrics = this.metrics.get(name);
+      const circuitBreaker = this.circuitBreakers.get(name);
+
+      return {
+        name,
+        config,
+        health,
+        metrics,
+        circuitBreaker,
+        isEnabled: config?.enabled || false,
+        canExecute: circuitBreaker?.canExecute() || false,
+        priority: config?.priority || 1,
+        recentFailures: this.getRecentFailureCount(name, 300000), // 5 minutes
+        lastFailureTime: this.getLastFailureTime(name),
+      };
+    });
+
+    // Filter and sort providers for fallback
+    return providersWithMetadata
+      .filter((p) => p.isEnabled && p.canExecute)
+      .sort((a, b) => {
+        // Primary sort: fewer recent failures
+        if (a.recentFailures !== b.recentFailures) {
+          return a.recentFailures - b.recentFailures;
+        }
+
+        // Secondary sort: higher priority
+        if (a.priority !== b.priority) {
+          return b.priority - a.priority;
+        }
+
+        // Tertiary sort: older last failure time (more time to recover)
+        const aFailureTime = a.lastFailureTime || 0;
+        const bFailureTime = b.lastFailureTime || 0;
+        return aFailureTime - bFailureTime;
+      })
+      .map((p) => ({
+        name: p.name,
+        maxRetries: this.getProviderMaxRetries(p.name, options),
+        priority: p.priority,
+        lastFailureTime: p.lastFailureTime,
+        recentFailures: p.recentFailures,
+      }));
+  }
+
+  /**
+   * Validate fallback scenario and determine recovery strategy
+   * @param {Array} attemptedProviders - Providers already attempted
+   * @param {Error} lastError - Last error encountered
+   * @param {Object} options - Validation options
+   * @returns {Object} Fallback validation result
+   * @private
+   */
+  validateFallbackScenario(attemptedProviders, lastError, options = {}) {
+    const totalProviders = this.providers.size;
+    const attemptedCount = attemptedProviders.length;
+    const remainingProviders = totalProviders - attemptedCount;
+
+    const errorType = this.classifyError(lastError);
+    const errorSeverity = this.classifyErrorSeverity(lastError);
+
+    // Determine if fallback should continue
+    const shouldContinueFallback =
+      remainingProviders > 0 &&
+      (errorSeverity !== 'critical' || options.allowCriticalFallback);
+
+    // Determine recovery strategy
+    let recoveryStrategy = 'continue';
+    if (errorType === 'rate_limit') {
+      recoveryStrategy = 'backoff_and_retry';
+    } else if (errorType === 'authentication') {
+      recoveryStrategy = 'skip_provider';
+    } else if (errorSeverity === 'critical') {
+      recoveryStrategy = 'immediate_fallback';
+    }
+
+    return {
+      shouldContinue: shouldContinueFallback,
+      remainingProviders,
+      recoveryStrategy,
+      errorType,
+      errorSeverity,
+      recommendation: this.generateFallbackRecommendation(
+        attemptedProviders,
+        errorType,
+        remainingProviders
+      ),
+    };
+  }
+
+  /**
+   * Generate fallback recommendation based on failure patterns
+   * @param {Array} attemptedProviders - Providers already attempted
+   * @param {string} errorType - Type of error encountered
+   * @param {number} remainingProviders - Number of remaining providers
+   * @returns {string} Fallback recommendation
+   * @private
+   */
+  generateFallbackRecommendation(
+    attemptedProviders,
+    errorType,
+    remainingProviders
+  ) {
+    if (remainingProviders === 0) {
+      return 'No more providers available for fallback';
+    }
+
+    if (errorType === 'rate_limit') {
+      return 'Consider implementing exponential backoff before trying remaining providers';
+    }
+
+    if (errorType === 'authentication') {
+      return 'Check provider credentials and configuration';
+    }
+
+    if (errorType === 'timeout') {
+      return 'Try providers with better response time characteristics';
+    }
+
+    if (attemptedProviders.length >= 2) {
+      return 'Multiple provider failures detected - investigate system-wide issues';
+    }
+
+    return `Continue with ${remainingProviders} remaining provider(s)`;
+  }
+
+  /**
+   * Test fallback scenarios for validation
+   * @param {Object} scenarios - Test scenarios configuration
+   * @returns {Promise<Object>} Test results
+   */
+  async testFallbackScenarios(scenarios = {}) {
+    const results = {
+      totalScenarios: 0,
+      passedScenarios: 0,
+      failedScenarios: 0,
+      scenarios: [],
+    };
+
+    // Test scenario 1: Primary provider failure
+    try {
+      results.totalScenarios++;
+      const primaryProvider = Array.from(this.providers.keys())[0];
+
+      // Temporarily disable primary provider
+      const originalHealth = this.healthStatus.get(primaryProvider);
+      this.healthStatus.set(primaryProvider, {
+        ...originalHealth,
+        isHealthy: false,
+      });
+
+      const selected = await this.selectProvider({ operation: 'test' });
+
+      // Restore original health
+      this.healthStatus.set(primaryProvider, originalHealth);
+
+      if (selected.name !== primaryProvider) {
+        results.passedScenarios++;
+        results.scenarios.push({
+          name: 'Primary provider failure fallback',
+          status: 'passed',
+          selectedProvider: selected.name,
+          fallbackUsed: selected.selectionMetadata?.fallbackUsed || false,
+        });
+      } else {
+        results.failedScenarios++;
+        results.scenarios.push({
+          name: 'Primary provider failure fallback',
+          status: 'failed',
+          reason: 'Failed to fallback from unhealthy primary provider',
+        });
+      }
+    } catch (error) {
+      results.failedScenarios++;
+      results.scenarios.push({
+        name: 'Primary provider failure fallback',
+        status: 'failed',
+        reason: error.message,
+      });
+    }
+
+    // Test scenario 2: All providers unhealthy
+    try {
+      results.totalScenarios++;
+
+      // Store original health statuses
+      const originalHealthStatuses = new Map();
+      for (const [name, health] of this.healthStatus) {
+        originalHealthStatuses.set(name, { ...health });
+        this.healthStatus.set(name, { ...health, isHealthy: false });
+      }
+
+      try {
+        const selected = await this.selectProvider({ operation: 'test' });
+
+        // Should still select a provider even if unhealthy
+        results.passedScenarios++;
+        results.scenarios.push({
+          name: 'All providers unhealthy fallback',
+          status: 'passed',
+          selectedProvider: selected.name,
+          fallbackUsed: true,
+        });
+      } catch (error) {
+        if (error.message.includes('No providers available')) {
+          results.failedScenarios++;
+          results.scenarios.push({
+            name: 'All providers unhealthy fallback',
+            status: 'failed',
+            reason: 'No fallback mechanism for all unhealthy providers',
+          });
+        }
+      }
+
+      // Restore original health statuses
+      for (const [name, health] of originalHealthStatuses) {
+        this.healthStatus.set(name, health);
+      }
+    } catch (error) {
+      results.failedScenarios++;
+      results.scenarios.push({
+        name: 'All providers unhealthy fallback',
+        status: 'failed',
+        reason: error.message,
+      });
+    }
+
+    return results;
   }
 
   /**
@@ -821,6 +1209,7 @@ class ProviderManager extends EventEmitter {
     const available = [];
     const context = requirements.context || {};
     const userId = requirements.userId;
+    const allowUnhealthy = requirements.allowUnhealthy || false;
 
     for (const [name, provider] of this.providers) {
       const config = this.providerConfigs.get(name);
@@ -840,11 +1229,16 @@ class ProviderManager extends EventEmitter {
         continue;
       }
 
-      if (
-        config?.enabled &&
-        health?.isHealthy &&
-        circuitBreaker?.canExecute()
-      ) {
+      // Enhanced fallback logic: include providers based on availability criteria
+      const isProviderAvailable = this.isProviderAvailableForFallback(
+        name,
+        config,
+        health,
+        circuitBreaker,
+        allowUnhealthy
+      );
+
+      if (isProviderAvailable) {
         const baseScore = this.calculateProviderScore(
           name,
           metrics,
@@ -856,8 +1250,11 @@ class ProviderManager extends EventEmitter {
         const preferenceBonus = preferences.isPreferred ? 25 : 0;
         const priorityScore = preferences.finalPriority;
 
+        // Apply health penalty for unhealthy providers
+        const healthPenalty = health?.isHealthy ? 0 : -20;
+
         const enhancedScore =
-          baseScore + preferenceBonus + (priorityScore - 50);
+          baseScore + preferenceBonus + (priorityScore - 50) + healthPenalty;
 
         available.push({
           name,
@@ -870,11 +1267,159 @@ class ProviderManager extends EventEmitter {
           baseScore,
           preferenceBonus,
           priorityScore,
+          healthPenalty,
+          isHealthy: health?.isHealthy || false,
         });
       }
     }
 
     return available.sort((a, b) => b.score - a.score);
+  }
+
+  /**
+   * Determine if a provider is available for fallback scenarios
+   * @param {string} name - Provider name
+   * @param {Object} config - Provider configuration
+   * @param {Object} health - Provider health status
+   * @param {Object} circuitBreaker - Circuit breaker instance
+   * @param {boolean} allowUnhealthy - Whether to allow unhealthy providers
+   * @returns {boolean} Whether provider is available
+   * @private
+   */
+  isProviderAvailableForFallback(
+    name,
+    config,
+    health,
+    circuitBreaker,
+    allowUnhealthy
+  ) {
+    // Provider must be enabled
+    if (!config?.enabled) {
+      return false;
+    }
+
+    // Circuit breaker must allow execution
+    if (!circuitBreaker?.canExecute()) {
+      return false;
+    }
+
+    // If allowing unhealthy providers (fallback mode), include all enabled providers
+    if (allowUnhealthy) {
+      return true;
+    }
+
+    // Standard mode: only healthy providers
+    return health?.isHealthy === true;
+  }
+
+  /**
+   * Classify error for fallback decision making
+   * @param {Error} error - The error to classify
+   * @returns {string} Error classification
+   * @private
+   */
+  classifyError(error) {
+    if (!error) return 'unknown';
+
+    const message = error.message?.toLowerCase() || '';
+    const code = error.code?.toLowerCase() || '';
+
+    // Network and connection errors
+    if (message.includes('timeout') || code.includes('timeout')) {
+      return 'timeout';
+    }
+    if (
+      message.includes('connection') ||
+      code.includes('econnrefused') ||
+      code.includes('enotfound')
+    ) {
+      return 'connection_failed';
+    }
+    if (
+      message.includes('network') ||
+      code.includes('enetdown') ||
+      code.includes('enetunreach')
+    ) {
+      return 'network_error';
+    }
+
+    // Authentication and authorization errors
+    if (
+      message.includes('auth') ||
+      message.includes('unauthorized') ||
+      message.includes('forbidden')
+    ) {
+      return 'authentication_failed';
+    }
+    if (message.includes('api key') || message.includes('token')) {
+      return 'invalid_credentials';
+    }
+
+    // Rate limiting and quota errors
+    if (
+      message.includes('rate limit') ||
+      message.includes('quota') ||
+      message.includes('too many requests')
+    ) {
+      return 'rate_limited';
+    }
+
+    // Service and capacity errors
+    if (
+      message.includes('service unavailable') ||
+      message.includes('server error') ||
+      code.includes('503')
+    ) {
+      return 'service_unavailable';
+    }
+    if (message.includes('capacity') || message.includes('overload')) {
+      return 'capacity_exceeded';
+    }
+
+    // Model and input errors
+    if (message.includes('model') || message.includes('invalid input')) {
+      return 'invalid_request';
+    }
+
+    // Circuit breaker errors
+    if (
+      message.includes('circuit breaker') ||
+      message.includes('breaker open')
+    ) {
+      return 'circuit_breaker_open';
+    }
+
+    return 'unknown_error';
+  }
+
+  /**
+   * Get recent failure history for a provider
+   * @param {string} providerName - Provider name
+   * @returns {Array} Recent failure history
+   * @private
+   */
+  getRecentFailureHistory(providerName) {
+    const health = this.healthStatus.get(providerName);
+    if (!health || !health.recentFailures) {
+      return [];
+    }
+
+    // Return failures from the last 5 minutes
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    return health.recentFailures.filter(
+      (failure) => failure.timestamp > fiveMinutesAgo
+    );
+  }
+
+  /**
+   * Get the last used provider
+   * @returns {string|null} Last used provider name
+   * @private
+   */
+  getLastUsedProvider() {
+    // This could be enhanced to track the actual last used provider
+    // For now, return null as a placeholder
+    return null;
   }
 
   /**
@@ -2293,28 +2838,110 @@ class LoadBalancer {
   selectProvider(providers, requirements = {}) {
     const algorithm = requirements.loadBalancing || 'weighted';
     const selector = this.algorithms[algorithm] || this.algorithms.weighted;
-    return selector(providers, requirements);
+
+    const selectedProvider = selector(providers, requirements);
+
+    // Enhance provider with selection metadata
+    if (selectedProvider) {
+      selectedProvider.selectionMetadata = {
+        algorithm: algorithm,
+        strategy: requirements.strategy || 'default',
+        timestamp: Date.now(),
+        score: selectedProvider.score || 0,
+        totalCandidates: providers.length,
+        selectionReason: this.getSelectionReason(
+          selectedProvider,
+          providers,
+          algorithm
+        ),
+        ...selectedProvider.selectionMetadata,
+      };
+    }
+
+    return selectedProvider;
   }
 
-  roundRobin(providers) {
-    const provider = providers[this.roundRobinIndex % providers.length];
+  getSelectionReason(selected, providers, algorithm) {
+    switch (algorithm) {
+      case 'weighted':
+        return `Selected based on weighted score: ${selected.score || 0}`;
+      case 'round-robin':
+        return `Selected via round-robin rotation (index: ${
+          this.roundRobinIndex - 1
+        })`;
+      case 'least-connections':
+        return `Selected for lowest connection count: ${
+          selected.activeConnections || 0
+        }`;
+      case 'response-time':
+        return `Selected for fastest response time: ${
+          selected.averageResponseTime || 0
+        }ms`;
+      default:
+        return `Selected via ${algorithm} algorithm`;
+    }
+  }
+
+  roundRobin(providers, requirements = {}) {
+    const currentIndex = this.roundRobinIndex % providers.length;
+    const provider = providers[currentIndex];
     this.roundRobinIndex++;
+
+    provider.selectionMetadata = {
+      reason: 'Round-robin rotation',
+      currentIndex: currentIndex,
+      totalProviders: providers.length,
+      nextIndex: this.roundRobinIndex % providers.length,
+    };
+
     return provider;
   }
 
-  weighted(providers) {
+  weighted(providers, requirements = {}) {
+    // Sort providers by score for consistent selection
+    const sortedProviders = [...providers].sort(
+      (a, b) => (b.score || 0) - (a.score || 0)
+    );
+
     // Select based on score (higher score = higher probability)
-    const totalScore = providers.reduce((sum, p) => sum + p.score, 0);
-    if (totalScore === 0) return providers[0];
+    const totalScore = sortedProviders.reduce(
+      (sum, p) => sum + (p.score || 0),
+      0
+    );
+
+    if (totalScore === 0) {
+      // If no scores, select by priority or first available
+      const selected = sortedProviders[0];
+      selected.selectionMetadata = {
+        reason: 'No scores available, selected first provider',
+        totalScore: 0,
+      };
+      return selected;
+    }
 
     let random = Math.random() * totalScore;
-    for (const provider of providers) {
-      random -= provider.score;
+    for (const provider of sortedProviders) {
+      random -= provider.score || 0;
       if (random <= 0) {
+        provider.selectionMetadata = {
+          reason: 'Weighted random selection',
+          totalScore: totalScore,
+          providerScore: provider.score || 0,
+          selectionProbability:
+            (((provider.score || 0) / totalScore) * 100).toFixed(2) + '%',
+        };
         return provider;
       }
     }
-    return providers[0];
+
+    // Fallback to highest scored provider
+    const selected = sortedProviders[0];
+    selected.selectionMetadata = {
+      reason: 'Fallback to highest scored provider',
+      totalScore: totalScore,
+      providerScore: selected.score || 0,
+    };
+    return selected;
   }
 
   leastConnections(providers) {

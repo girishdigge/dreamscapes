@@ -1,7 +1,17 @@
 // services/express/middleware/validation.js
-const Ajv = require('ajv');
+const {
+  UnifiedValidator,
+  validationMonitor,
+  utils,
+} = require('@dreamscapes/shared');
 
-// Dream JSON schema
+// Initialize unified validator instance
+const unifiedValidator = new UnifiedValidator({
+  strictMode: true,
+  logErrors: true,
+});
+
+// Dream JSON schema (kept for backward compatibility with AJV-based code)
 const dreamSchema = {
   type: 'object',
   required: ['id', 'title', 'style'],
@@ -221,7 +231,8 @@ const dreamSchema = {
   },
 };
 
-// Initialize AJV with custom formats
+// Legacy AJV support (kept for backward compatibility with existing code)
+const Ajv = require('ajv');
 const ajv = new Ajv({
   allErrors: true,
   removeAdditional: false,
@@ -239,85 +250,43 @@ ajv.addFormat('date-time', {
 
 const validateDreamSchema = ajv.compile(dreamSchema);
 
-// Main validation function
-function validateDream(dreamData) {
+// Main validation function using unified validator
+function validateDream(dreamData, context = {}) {
   if (!dreamData || typeof dreamData !== 'object') {
-    return {
+    const result = {
       valid: false,
       errors: ['Dream data must be an object'],
     };
+
+    // Record validation in monitor
+    validationMonitor.recordValidation('express', result, context);
+
+    return result;
   }
 
-  const valid = validateDreamSchema(dreamData);
+  // Use unified validator for comprehensive validation
+  const validationResult = unifiedValidator.validateDreamObject(dreamData);
 
-  if (!valid) {
-    const errors = validateDreamSchema.errors.map((error) => {
-      const field = error.instancePath || error.schemaPath;
-      return `${field}: ${error.message}`;
-    });
+  // Format errors for backward compatibility
+  const formattedErrors = validationResult.errors.map((error) => {
+    return error.message || `${error.field}: ${error.error}`;
+  });
 
-    return {
-      valid: false,
-      errors,
-      details: validateDreamSchema.errors,
-    };
-  }
+  const result = {
+    valid: validationResult.valid,
+    errors: formattedErrors,
+    details: validationResult.errors,
+    errorCount: validationResult.errorCount,
+    validationTime: validationResult.validationTime,
+  };
 
-  // Additional custom validations
-  const customErrors = [];
+  // Record validation in monitor
+  validationMonitor.recordValidation('express', validationResult, {
+    dreamId: dreamData?.id,
+    ...context,
+  });
 
-  // Validate cinematography duration matches shot durations
-  if (dreamData.cinematography && dreamData.cinematography.shots) {
-    const totalShotDuration = dreamData.cinematography.shots.reduce(
-      (sum, shot) => sum + (shot.duration || 0),
-      0
-    );
-
-    const declaredDuration = dreamData.cinematography.durationSec;
-    if (Math.abs(totalShotDuration - declaredDuration) > 2) {
-      customErrors.push(
-        `Total shot duration (${totalShotDuration}s) doesn't match declared duration (${declaredDuration}s)`
-      );
-    }
-  }
-
-  // Validate entity counts are reasonable
-  if (dreamData.entities) {
-    const totalEntities = dreamData.entities.reduce(
-      (sum, entity) => sum + (entity.count || 0),
-      0
-    );
-
-    if (totalEntities > 500) {
-      customErrors.push(
-        `Total entity count (${totalEntities}) exceeds recommended maximum (500)`
-      );
-    }
-  }
-
-  // Validate structure positions are reasonable
-  if (dreamData.structures) {
-    dreamData.structures.forEach((structure, index) => {
-      if (structure.pos) {
-        const [x, y, z] = structure.pos;
-        if (Math.abs(x) > 1000 || Math.abs(y) > 1000 || Math.abs(z) > 1000) {
-          customErrors.push(
-            `Structure ${index} position is too far from origin: [${x}, ${y}, ${z}]`
-          );
-        }
-      }
-    });
-  }
-
-  if (customErrors.length > 0) {
-    return {
-      valid: false,
-      errors: customErrors,
-      type: 'custom_validation',
-    };
-  }
-
-  return { valid: true };
+  return result;
 }
 
 // Validation middleware for requests
@@ -429,38 +398,18 @@ const validateParseDreamRequest = validateRequest(parseDreamRequestSchema);
 const validatePatchDreamRequest = validateRequest(patchDreamRequestSchema);
 const validateExportRequest = validateRequest(exportRequestSchema);
 
-// Sanitization functions
+// Sanitization functions (using shared utilities)
 function sanitizeText(text) {
-  if (typeof text !== 'string') return '';
-
-  return text
-    .trim()
-    .replace(/[<>]/g, '') // Remove potential HTML tags
-    .replace(/\s+/g, ' ') // Normalize whitespace
-    .substring(0, 2000); // Enforce max length
+  return utils.sanitizeText(text, 2000);
 }
 
 function sanitizeDreamId(dreamId) {
-  if (typeof dreamId !== 'string') return '';
-
-  return dreamId
-    .trim()
-    .replace(/[^a-zA-Z0-9_-]/g, '') // Keep only alphanumeric, underscore, dash
-    .substring(0, 50); // Reasonable max length
+  return utils.sanitizeId(dreamId, 50);
 }
 
-// Error formatting helper
+// Error formatting helper (using shared utilities)
 function formatValidationError(errors) {
-  return {
-    error: 'Validation failed',
-    details: Array.isArray(errors) ? errors : [errors],
-    timestamp: new Date().toISOString(),
-    suggestions: [
-      'Check the API documentation for correct request format',
-      'Ensure all required fields are provided',
-      'Verify data types match the schema requirements',
-    ],
-  };
+  return utils.formatValidationErrors(errors);
 }
 
 module.exports = {
@@ -472,4 +421,6 @@ module.exports = {
   sanitizeDreamId,
   formatValidationError,
   dreamSchema,
+  unifiedValidator, // Export unified validator for direct access
+  validationMonitor, // Export validation monitor for metrics access
 };

@@ -6,7 +6,7 @@ module.exports = {
   apiUrl:
     process.env.CEREBRAS_API_URL ||
     'https://api.cerebras.ai/v1/chat/completions',
-  model: process.env.CEREBRAS_MODEL || 'llama-4-maverick-17b-128e-instruct',
+  model: process.env.CEREBRAS_MODEL || 'llama-3.3-70b',
   defaults: {
     temperature: 0.6,
     maxTokens: 32768,

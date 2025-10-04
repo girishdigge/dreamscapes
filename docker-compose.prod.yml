@@ -49,7 +49,7 @@ services:
       retries: 3
       start_period: 30s
 
-  # MCP Gateway - production mode
+  # MCP Gateway - production mode with optimized AI provider integration
   mcp-gateway:
     build:
       context: ./services/mcp-gateway
@@ -57,11 +57,35 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=8080
+      # Production Cerebras Configuration
       - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
-      - CEREBRAS_API_URL=${CEREBRAS_API_URL:-https://api.cerebras.ai/v1/chat/completions}
+      - CEREBRAS_API_URL=${CEREBRAS_API_URL:-https://api.cerebras.ai/v1}
+      - CEREBRAS_MODEL=${CEREBRAS_MODEL:-llama-3.3-70b}
+      - CEREBRAS_TEMPERATURE=${CEREBRAS_TEMPERATURE:-0.6}
+      - CEREBRAS_TOP_P=${CEREBRAS_TOP_P:-0.9}
+      - CEREBRAS_MAX_TOKENS=${CEREBRAS_MAX_TOKENS:-32768}
+      - CEREBRAS_STREAM=${CEREBRAS_STREAM:-true}
+      # Provider Configuration
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4}
       - LLAMA_URL=http://llama-stylist:8000
       - RENDER_WORKER_URL=http://render-worker:8001
+      # Production Caching Configuration
+      - REDIS_URL=redis://redis:6379
+      - CACHE_DEFAULT_TTL=${CACHE_DEFAULT_TTL:-7200}
+      - CACHE_MAX_SIZE=${CACHE_MAX_SIZE:-50000}
+      - CACHE_ENABLE_SEMANTIC_SIMILARITY=${CACHE_ENABLE_SEMANTIC_SIMILARITY:-true}
+      - CACHE_QUALITY_THRESHOLD=${CACHE_QUALITY_THRESHOLD:-0.85}
+      # Production Provider Management
+      - PROVIDER_FALLBACK_ENABLED=${PROVIDER_FALLBACK_ENABLED:-true}
+      - PROVIDER_RETRY_ATTEMPTS=${PROVIDER_RETRY_ATTEMPTS:-5}
+      - PROVIDER_RETRY_DELAY=${PROVIDER_RETRY_DELAY:-2000}
+      - PROVIDER_TIMEOUT=${PROVIDER_TIMEOUT:-45000}
+      - PROVIDER_CIRCUIT_BREAKER_THRESHOLD=${PROVIDER_CIRCUIT_BREAKER_THRESHOLD:-3}
+      # Production Monitoring
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      - METRICS_INTERVAL=${METRICS_INTERVAL:-120000}
+      - LOG_LEVEL=${LOG_LEVEL:-warn}
     depends_on:
       llama-stylist:
         condition: service_healthy
@@ -70,11 +94,11 @@ services:
     deploy:
       resources:
         limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
           memory: 512M
           cpus: '0.5'
-        reservations:
-          memory: 128M
-          cpus: '0.1'
     healthcheck:
       interval: 30s
       timeout: 10s
@@ -139,22 +163,30 @@ services:
       retries: 3
       start_period: 60s
 
-  # Redis for production caching
+  # Redis for production caching with enhanced AI provider optimization
   redis:
     image: redis:7-alpine
     ports:
       - '6379:6379'
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAX_MEMORY:-1gb} --maxmemory-policy allkeys-lru --save 300 100 --tcp-keepalive 60
     volumes:
       - redis_data:/data
+    environment:
+      - REDIS_REPLICATION_MODE=master
     deploy:
       resources:
         limits:
-          memory: 256M
-          cpus: '0.25'
+          memory: 1G
+          cpus: '0.5'
         reservations:
-          memory: 64M
-          cpus: '0.05'
+          memory: 256M
+          cpus: '0.1'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
 volumes:

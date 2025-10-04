@@ -191,6 +191,49 @@ router.get(
           dashboard.monitoring.alertingSystemActive = true;
         }
 
+        // Get extraction metrics if available
+        const extractionMetricsCollector =
+          req.app.locals.extractionMetricsCollector;
+        if (extractionMetricsCollector) {
+          try {
+            const extractionReport =
+              extractionMetricsCollector.getMetricsReport();
+            dashboard.extraction = {
+              overall: extractionReport.overall,
+              byProvider: extractionReport.byProvider,
+              topPatterns: Object.entries(extractionReport.byPattern || {})
+                .map(([pattern, metrics]) => ({
+                  pattern,
+                  successRate: metrics.successRate,
+                  attempts: metrics.attempts,
+                }))
+                .sort((a, b) => b.successRate - a.successRate)
+                .slice(0, 5),
+              failurePatterns: extractionReport.failurePatterns.slice(0, 3),
+              insights: extractionReport.insights,
+            };
+
+            // Generate extraction alerts
+            const extractionAlerts =
+              extractionMetricsCollector.generateExtractionAlerts();
+            extractionAlerts.forEach((alert) => {
+              if (alert.severity === 'critical') {
+                dashboard.alerts.critical++;
+              } else if (alert.severity === 'warning') {
+                dashboard.alerts.warning++;
+              } else {
+                dashboard.alerts.info++;
+              }
+              dashboard.alerts.recent.push(alert);
+            });
+          } catch (extractionError) {
+            logger.warn(
+              'Failed to get extraction metrics:',
+              extractionError.message
+            );
+          }
+        }
+
         // Generate alerts based on current status
         Object.entries(dashboard.providers.details).forEach(
           ([providerName, health]) => {
@@ -201,6 +244,7 @@ router.get(
               dashboard.alerts.critical++;
               dashboard.alerts.recent.push({
                 type: 'critical',
+                category: 'provider',
                 provider: providerName,
                 message:
                   failureRate >= 0.5
@@ -212,6 +256,7 @@ router.get(
               dashboard.alerts.warning++;
               dashboard.alerts.recent.push({
                 type: 'warning',
+                category: 'provider',
                 provider: providerName,
                 message:
                   failureRate >= 0.2
@@ -557,6 +602,9 @@ router.get(
           warningConsecutiveFailures: 3,
           criticalResponseTime: 30000,
           warningResponseTime: 10000,
+          extractionFailureRate: 0.1, // 10%
+          extractionPatternFailureRate: 0.8, // 80%
+          providerExtractionFailureRate: 0.5, // 50%
         },
         alertingEnabled: false,
       },
@@ -738,6 +786,47 @@ router.get(
             });
           }
         );
+
+        // Add extraction-specific alerts
+        const extractionMetricsCollector =
+          req.app.locals.extractionMetricsCollector;
+        if (extractionMetricsCollector) {
+          try {
+            const extractionAlerts =
+              extractionMetricsCollector.generateExtractionAlerts();
+
+            // Filter by provider if specified
+            const filteredExtractionAlerts = provider
+              ? extractionAlerts.filter(
+                  (alert) => !alert.provider || alert.provider === provider
+                )
+              : extractionAlerts;
+
+            // Filter by severity if specified
+            const severityFilteredAlerts = severity
+              ? filteredExtractionAlerts.filter(
+                  (alert) => alert.severity === severity
+                )
+              : filteredExtractionAlerts;
+
+            alertData.alerts.push(...severityFilteredAlerts);
+
+            // Update summary counts
+            severityFilteredAlerts.forEach((alert) => {
+              alertData.summary[alert.severity]++;
+              alertData.summary.total++;
+            });
+
+            logger.debug('Added extraction alerts to alert data', {
+              extractionAlertsCount: severityFilteredAlerts.length,
+            });
+          } catch (extractionError) {
+            logger.warn(
+              'Failed to get extraction alerts:',
+              extractionError.message
+            );
+          }
+        }
 
         // Sort alerts by severity and timestamp
         alertData.alerts.sort((a, b) => {

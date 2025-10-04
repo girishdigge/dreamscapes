@@ -6,6 +6,7 @@ const MetricsCollector = require('./MetricsCollector');
 const AlertingSystem = require('./AlertingSystem');
 const HealthMonitor = require('./HealthMonitor');
 const MonitoringDashboard = require('./MonitoringDashboard');
+const AsyncMetricsTracker = require('./AsyncMetricsTracker');
 
 /**
  * Monitoring Integration - Orchestrates all monitoring components
@@ -17,12 +18,14 @@ class MonitoringIntegration {
       enableAlerting: config.enableAlerting !== false,
       enableHealthMonitoring: config.enableHealthMonitoring !== false,
       enableDashboard: config.enableDashboard !== false,
+      enableAsyncMetrics: config.enableAsyncMetrics !== false,
 
       // Component configurations
       metrics: config.metrics || {},
       alerting: config.alerting || {},
       health: config.health || {},
       dashboard: config.dashboard || {},
+      asyncMetrics: config.asyncMetrics || {},
 
       // Integration settings
       autoStart: config.autoStart !== false,
@@ -36,6 +39,7 @@ class MonitoringIntegration {
     this.alertingSystem = null;
     this.healthMonitor = null;
     this.monitoringDashboard = null;
+    this.asyncMetricsTracker = null;
 
     // State tracking
     this.isInitialized = false;
@@ -109,6 +113,14 @@ class MonitoringIntegration {
         this.logger.info('MonitoringDashboard initialized');
       }
 
+      // Initialize AsyncMetricsTracker
+      if (this.config.enableAsyncMetrics) {
+        this.asyncMetricsTracker = new AsyncMetricsTracker(
+          this.config.asyncMetrics
+        );
+        this.logger.info('AsyncMetricsTracker initialized');
+      }
+
       // Setup component integrations
       this.setupComponentIntegrations();
 
@@ -163,8 +175,14 @@ class MonitoringIntegration {
           metricsCollector: this.metricsCollector,
           alertingSystem: this.alertingSystem,
           healthMonitor: this.healthMonitor,
+          asyncMetricsTracker: this.asyncMetricsTracker,
         });
         this.logger.info('MonitoringDashboard started');
+      }
+
+      // AsyncMetricsTracker starts automatically on initialization
+      if (this.asyncMetricsTracker) {
+        this.logger.info('AsyncMetricsTracker active');
       }
 
       this.isStarted = true;
@@ -202,6 +220,11 @@ class MonitoringIntegration {
       if (this.metricsCollector) {
         this.metricsCollector.stopCollection();
         this.logger.info('MetricsCollector stopped');
+      }
+
+      if (this.asyncMetricsTracker) {
+        this.asyncMetricsTracker.stopAggregation();
+        this.logger.info('AsyncMetricsTracker stopped');
       }
 
       this.isStarted = false;
@@ -379,6 +402,10 @@ class MonitoringIntegration {
           active: !!this.monitoringDashboard && this.isStarted,
           webPort: this.config.dashboard?.webPort || 3001,
         },
+        asyncMetricsTracker: {
+          enabled: this.config.enableAsyncMetrics,
+          active: !!this.asyncMetricsTracker,
+        },
       },
       timestamp: new Date(),
     };
@@ -412,6 +439,15 @@ class MonitoringIntegration {
 
     if (this.monitoringDashboard) {
       report.dashboard = this.monitoringDashboard.getDashboardData();
+    }
+
+    if (this.asyncMetricsTracker) {
+      report.asyncMetrics = {
+        realtime: this.asyncMetricsTracker.getRealtimeMetrics(),
+        aggregated: this.asyncMetricsTracker.getAggregatedMetrics(
+          options.timeRange || 3600000
+        ),
+      };
     }
 
     return report;
@@ -555,6 +591,10 @@ class MonitoringIntegration {
 
       if (this.alertingSystem) {
         this.alertingSystem.destroy();
+      }
+
+      if (this.asyncMetricsTracker) {
+        this.asyncMetricsTracker.destroy();
       }
 
       this.isInitialized = false;

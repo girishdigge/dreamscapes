@@ -5,6 +5,8 @@ import { useState, useEffect } from 'react';
 import DreamInput from './components/DreamInput';
 import DreamScene from './components/DreamScene';
 import DreamControls from './components/DreamControls';
+import DebugPanel from './components/DebugPanel';
+import ErrorBoundary from './components/ErrorBoundary';
 import { Dream } from './types/dream';
 
 export default function Home() {
@@ -36,12 +38,40 @@ export default function Home() {
 
       const result = await response.json();
 
+      console.log('🔍 Full API Response:', result);
+      console.log('🔍 Response Status:', response.status);
+      console.log(
+        '🔍 Response Headers:',
+        Object.fromEntries(response.headers.entries())
+      );
+
       if (result.success) {
-        setDream(result.data);
-        console.log('Generated dream:', result.data);
+        console.log('✅ Dream generation successful');
+        console.log('🎨 Dream data:', result.data);
+        console.log('📊 Dream metadata:', result.metadata);
+
+        // Validate dream data before setting
+        if (result.data && typeof result.data === 'object') {
+          console.log('✅ Dream data is valid object');
+          console.log('🔍 Dream validation:', {
+            hasId: !!result.data.id,
+            hasStyle: !!result.data.style,
+            hasStructures: Array.isArray(result.data.structures),
+            hasEntities: Array.isArray(result.data.entities),
+            hasCinematography: !!result.data.cinematography,
+          });
+
+          setDream(result.data);
+          console.log('✅ Dream state updated successfully');
+        } else {
+          console.error('❌ Invalid dream data structure:', result.data);
+          throw new Error('Invalid dream data structure received');
+        }
       } else {
+        console.warn('⚠️ API returned success: false');
         // Use fallback if provided
         if (result.data) {
+          console.log('🔄 Using fallback dream data');
           setDream(result.data);
           setError('Using fallback dream due to API issues');
         } else {
@@ -333,12 +363,14 @@ export default function Home() {
         {/* Right Panel - 3D Scene */}
         <div className='lg:w-2/3 relative'>
           {dream ? (
-            <DreamScene
-              dream={dream}
-              isPlaying={isPlaying}
-              currentTime={currentTime}
-              onTimeUpdate={setCurrentTime}
-            />
+            <ErrorBoundary>
+              <DreamScene
+                dream={dream}
+                isPlaying={isPlaying}
+                currentTime={currentTime}
+                onTimeUpdate={setCurrentTime}
+              />
+            </ErrorBoundary>
           ) : (
             <div className='h-full flex items-center justify-center bg-black/20'>
               <div className='text-center'>
@@ -352,6 +384,9 @@ export default function Home() {
           )}
         </div>
       </div>
+
+      {/* Debug Panel (Development Only) */}
+      <DebugPanel dream={dream} isGenerating={isGenerating} error={error} />
     </div>
   );
 }

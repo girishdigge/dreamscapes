@@ -2,6 +2,8 @@
 // Multi-stage response processing pipeline with fallback strategies
 
 const EnhancedResponseParser = require('./EnhancedResponseParser');
+const EnhancedContentExtractor = require('./EnhancedContentExtractor');
+const ResponseStructureInspector = require('./ResponseStructureInspector');
 
 /**
  * Robust Response Processing Pipeline
@@ -26,6 +28,21 @@ class ResponseProcessingPipeline {
       maxContentLength: this.config.maxContentLength,
       fallbackStrategies: this.config.enableFallbackStrategies,
       enableMonitoringIntegration: this.config.enableMonitoringIntegration,
+    });
+
+    // Initialize enhanced content extractor
+    this.contentExtractor = new EnhancedContentExtractor({
+      enableLogging: this.config.enableLogging,
+      maxDepth: 5,
+      logLevel: 'debug',
+    });
+
+    // Initialize response structure inspector
+    this.structureInspector = new ResponseStructureInspector({
+      enableDetailedLogging: this.config.enableLogging,
+      maxDepth: 5,
+      maxSampleLength: 500,
+      logLevel: 'debug',
     });
 
     // Processing stage registry
@@ -55,6 +72,7 @@ class ResponseProcessingPipeline {
       provider: providerName,
       operationType,
       responseType: typeof response,
+      response,
     });
 
     try {
@@ -117,7 +135,7 @@ class ResponseProcessingPipeline {
           validatedResult.data,
           { providerName, operationType, context, processingId }
         );
-
+        // console.log('sanitized Result:', sanitizedResult);
         if (!sanitizedResult.success) {
           return this._handleStageFailure(
             'sanitization',
@@ -231,16 +249,151 @@ class ResponseProcessingPipeline {
    * @private
    */
   _initializeDefaultStages() {
-    // Normalization Stage
+    // Normalization Stage - Enhanced with EnhancedContentExtractor
     this.registerProcessingStage('normalization', async (data, context) => {
+      // Pre-normalization logging: Inspect response structure before processing
+      this._log('debug', 'Starting normalization stage', {
+        provider: context.providerName,
+        responseType: typeof data,
+        hasData: !!data,
+      });
+
+      // Inspect response structure for debugging
+      const inspection = this.structureInspector.inspectResponse(
+        data,
+        context.providerName,
+        {
+          operationType: context.operationType,
+          processingId: context.processingId,
+        }
+      );
+
+      this._log('debug', 'Response structure inspection completed', {
+        provider: context.providerName,
+        responseType: inspection.responseType,
+        topLevelKeys: inspection.topLevelKeys,
+        hasCommonFields: inspection.hasCommonFields,
+      });
+
+      // Track extraction attempts for detailed logging
+      const extractionAttempts = [];
+
+      // Try EnhancedContentExtractor patterns first
+      this._log(
+        'debug',
+        'Attempting extraction with EnhancedContentExtractor',
+        {
+          provider: context.providerName,
+        }
+      );
+
+      const extractedContent = this.contentExtractor.extractContent(
+        data,
+        context.providerName
+      );
+
+      if (extractedContent) {
+        this._log(
+          'info',
+          'Content extracted successfully via EnhancedContentExtractor',
+          {
+            provider: context.providerName,
+            extractionMethod: 'enhanced_content_extractor',
+          }
+        );
+
+        return {
+          success: true,
+          data: extractedContent,
+          metadata: {
+            format: inspection.responseType,
+            method: 'enhanced_content_extractor',
+            extractionAttempts: this.contentExtractor.getExtractionMetrics(),
+          },
+        };
+      }
+
+      // Log that EnhancedContentExtractor failed
+      this._log(
+        'warn',
+        'EnhancedContentExtractor failed, falling back to EnhancedResponseParser',
+        {
+          provider: context.providerName,
+          extractionMetrics: this.contentExtractor.getExtractionMetrics(),
+        }
+      );
+
+      // Fallback to original EnhancedResponseParser
+      this._log('debug', 'Attempting extraction with EnhancedResponseParser', {
+        provider: context.providerName,
+      });
+
       const result = this.responseParser.normalizeResponse(
         data,
         context.providerName
       );
 
       if (!result.success) {
+        // Log detailed error with all attempted patterns
+        this._log('error', 'Normalization failed with all patterns', {
+          provider: context.providerName,
+          error: result.error,
+          responseType: inspection.responseType,
+          topLevelKeys: inspection.topLevelKeys,
+          hasCommonFields: inspection.hasCommonFields,
+          sampleContent: inspection.sampleContent?.substring(0, 200),
+          extractionMetrics: this.contentExtractor.getExtractionMetrics(),
+        });
+
         throw new Error(`Normalization failed: ${result.error}`);
       }
+
+      // Fallback to extract entire response as JSON string when no pattern matches
+      if (!result.data && typeof data === 'object') {
+        this._log(
+          'debug',
+          'Attempting to extract entire response as JSON string',
+          {
+            provider: context.providerName,
+          }
+        );
+
+        try {
+          const jsonString = JSON.stringify(data);
+          const parsedData = JSON.parse(jsonString);
+
+          // Check if parsed data is a dream object
+          if (this.contentExtractor.isDreamObject(parsedData)) {
+            this._log(
+              'info',
+              'Successfully extracted entire response as dream object',
+              {
+                provider: context.providerName,
+                method: 'json_string_fallback',
+              }
+            );
+
+            return {
+              success: true,
+              data: parsedData,
+              metadata: {
+                format: 'json_string_fallback',
+                method: 'json_string_extraction',
+              },
+            };
+          }
+        } catch (jsonError) {
+          this._log('warn', 'JSON string fallback failed', {
+            provider: context.providerName,
+            error: jsonError.message,
+          });
+        }
+      }
+
+      this._log('info', 'Content extracted via EnhancedResponseParser', {
+        provider: context.providerName,
+        format: result.format,
+      });
 
       return {
         success: true,
@@ -254,7 +407,34 @@ class ResponseProcessingPipeline {
 
     // Content Extraction Stage
     this.registerProcessingStage('extraction', async (data, context) => {
-      const result = this.responseParser.extractContent(
+      // Check if data is already extracted (object with dream structure)
+      if (typeof data === 'object' && data !== null) {
+        // Check if it's already a valid dream object
+        if (this.contentExtractor.isDreamObject(data)) {
+          this._log(
+            'debug',
+            'Data is already a valid dream object, skipping extraction',
+            {
+              provider: context.providerName,
+              hasId: !!data.id,
+              hasStructures: !!data.structures,
+              hasEntities: !!data.entities,
+            }
+          );
+
+          return {
+            success: true,
+            data: data,
+            metadata: {
+              method: 'already_extracted',
+              extractionStrategy: 'skip',
+            },
+          };
+        }
+      }
+
+      // Data is not yet extracted, proceed with extraction
+      const result = await this.responseParser.extractContent(
         data,
         context.operationType
       );
@@ -438,7 +618,6 @@ class ResponseProcessingPipeline {
           () => stage.function(data, context),
           stage.timeout
         );
-
         this._log('debug', `Stage completed: ${stageName}`);
         return result;
       } catch (error) {

@@ -212,6 +212,14 @@ class MonitoringMiddleware {
 
       recordRequestStart: (provider, requestData = {}) => {
         if (!this.monitoringIntegration) return null;
+
+        // Also record in async metrics tracker
+        if (this.monitoringIntegration.asyncMetricsTracker) {
+          this.monitoringIntegration.asyncMetricsTracker.recordRequest(
+            provider
+          );
+        }
+
         return this.monitoringIntegration.recordRequestStart(
           provider,
           requestData
@@ -221,6 +229,51 @@ class MonitoringMiddleware {
       recordRequestEnd: (requestId, result = {}) => {
         if (!this.monitoringIntegration) return;
         this.monitoringIntegration.recordRequestEnd(requestId, result);
+      },
+
+      // Async metrics tracking functions
+      recordPromiseDetection: (location, provider, context = {}) => {
+        if (this.monitoringIntegration?.asyncMetricsTracker) {
+          this.monitoringIntegration.asyncMetricsTracker.recordPromiseDetection(
+            location,
+            provider,
+            context
+          );
+        }
+      },
+
+      recordExtraction: (provider, success, error = null) => {
+        if (this.monitoringIntegration?.asyncMetricsTracker) {
+          this.monitoringIntegration.asyncMetricsTracker.recordExtraction(
+            provider,
+            success,
+            error
+          );
+        }
+      },
+
+      record502Error: (provider, reason, context = {}) => {
+        if (this.monitoringIntegration?.asyncMetricsTracker) {
+          this.monitoringIntegration.asyncMetricsTracker.record502Error(
+            provider,
+            reason,
+            context
+          );
+        }
+      },
+
+      recordFallbackUsage: (
+        provider,
+        reason,
+        fallbackType = 'local_generation'
+      ) => {
+        if (this.monitoringIntegration?.asyncMetricsTracker) {
+          this.monitoringIntegration.asyncMetricsTracker.recordFallbackUsage(
+            provider,
+            reason,
+            fallbackType
+          );
+        }
       },
     };
   }
@@ -408,6 +461,95 @@ class MonitoringMiddleware {
               supportedFormats: ['json'],
             });
           }
+        } catch (error) {
+          res.status(500).json({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      });
+
+      // Async metrics endpoint
+      app.get('/monitoring/async-metrics', (req, res) => {
+        try {
+          const asyncTracker = this.monitoringIntegration?.asyncMetricsTracker;
+
+          if (!asyncTracker) {
+            return res.status(503).json({
+              success: false,
+              error: 'Async metrics tracker not available',
+            });
+          }
+
+          const timeRange = parseInt(req.query.timeRange) || 3600000; // 1 hour default
+          const provider = req.query.provider;
+
+          let metricsData;
+          if (provider) {
+            metricsData = asyncTracker.getProviderMetrics(provider, timeRange);
+          } else {
+            metricsData = {
+              realtime: asyncTracker.getRealtimeMetrics(),
+              aggregated: asyncTracker.getAggregatedMetrics(timeRange),
+            };
+          }
+
+          res.json({
+            success: true,
+            data: metricsData,
+            timestamp: new Date().toISOString(),
+          });
+        } catch (error) {
+          res.status(500).json({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      });
+
+      // Async metrics time series endpoint
+      app.get('/monitoring/async-metrics/timeseries', (req, res) => {
+        try {
+          const asyncTracker = this.monitoringIntegration?.asyncMetricsTracker;
+
+          if (!asyncTracker) {
+            return res.status(503).json({
+              success: false,
+              error: 'Async metrics tracker not available',
+            });
+          }
+
+          const metric = req.query.metric || 'extractionSuccessRate';
+          const timeRange = parseInt(req.query.timeRange) || 3600000;
+
+          const validMetrics = [
+            'promiseDetections',
+            'extractionSuccessRate',
+            'error502Rate',
+            'fallbackUsageRate',
+          ];
+
+          if (!validMetrics.includes(metric)) {
+            return res.status(400).json({
+              success: false,
+              error: 'Invalid metric',
+              validMetrics,
+            });
+          }
+
+          const timeSeries = asyncTracker.getTimeSeries(metric, timeRange);
+
+          res.json({
+            success: true,
+            data: {
+              metric,
+              timeRange,
+              timeSeries,
+            },
+            timestamp: new Date().toISOString(),
+          });
         } catch (error) {
           res.status(500).json({
             success: false,

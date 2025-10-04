@@ -11,18 +11,29 @@ WORKDIR /app
 
 # Install dependencies in a separate layer for better caching
 FROM base AS deps
-COPY package*.json ./
+# Mirror local structure: set working directory to match local development
+WORKDIR /app/services/mcp-gateway
+COPY shared/ /app/shared/
+COPY services/mcp-gateway/package*.json ./
 RUN npm ci --only=production && npm cache clean --force
+WORKDIR /app
 
 # Development dependencies with TypeScript support
 FROM base AS dev-deps
-COPY package*.json ./
+# Mirror local structure: set working directory to match local development
+WORKDIR /app/services/mcp-gateway
+COPY shared/ /app/shared/
+COPY services/mcp-gateway/package*.json ./
 RUN npm ci && npm cache clean --force
+WORKDIR /app
 
 # Development stage with enhanced debugging
 FROM base AS development
-COPY --from=dev-deps /app/node_modules ./node_modules
-COPY . .
+# Mirror local structure: set working directory to match local development
+WORKDIR /app/services/mcp-gateway
+COPY --from=dev-deps /app/services/mcp-gateway/node_modules ./node_modules
+COPY shared/ /app/shared/
+COPY services/mcp-gateway/ .
 EXPOSE 8080
 ENV NODE_ENV=development
 ENV NODE_OPTIONS="--max-old-space-size=1024"
@@ -35,8 +46,11 @@ CMD ["npm", "run", "dev"]
 FROM base AS production
 ENV NODE_ENV=production
 ENV NODE_OPTIONS="--max-old-space-size=2048"
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+# Mirror local structure: set working directory to match local development
+WORKDIR /app/services/mcp-gateway
+COPY --from=deps /app/services/mcp-gateway/node_modules ./node_modules
+COPY shared/ /app/shared/
+COPY services/mcp-gateway/ .
 EXPOSE 8080
 # Health check endpoint for production
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \

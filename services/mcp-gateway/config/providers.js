@@ -7,7 +7,7 @@ module.exports = {
     priority: parseInt(process.env.CEREBRAS_PRIORITY) || 1,
     sdk: {
       apiKey: process.env.CEREBRAS_API_KEY || null,
-      model: process.env.CEREBRAS_MODEL || 'llama-4-maverick-17b-128e-instruct',
+      model: process.env.CEREBRAS_MODEL || 'llama-3.3-70b',
       streaming: process.env.CEREBRAS_STREAMING === 'true',
       maxTokens: parseInt(process.env.CEREBRAS_MAX_TOKENS) || 32768,
       temperature: parseFloat(process.env.CEREBRAS_TEMPERATURE) || 0.6,

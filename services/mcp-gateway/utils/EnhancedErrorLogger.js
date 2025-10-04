@@ -5,6 +5,16 @@ const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
 
+// Import TestCleanupManager for proper resource cleanup
+let TestCleanupManager;
+try {
+  const testCleanup = require('../tests/utils/testCleanup');
+  TestCleanupManager = testCleanup.testCleanupManager;
+} catch (error) {
+  // TestCleanupManager not available (not in test environment)
+  TestCleanupManager = null;
+}
+
 /**
  * Enhanced Error Logger - Comprehensive error logging with detailed context
  * Specifically designed for AI provider response parsing failures and monitoring integration
@@ -68,11 +78,23 @@ class EnhancedErrorLogger {
       this.startMonitoringIntegration();
     }
 
+    // Register with TestCleanupManager if in test environment
+    if (TestCleanupManager && process.env.NODE_ENV === 'test') {
+      TestCleanupManager.registerResource(
+        this,
+        'destroy',
+        'EnhancedErrorLogger.constructor'
+      );
+    }
+
     console.log('EnhancedErrorLogger initialized with config:', {
       logLevel: this.config.logLevel,
       enableFile: this.config.enableFile,
       enableMonitoringIntegration: this.config.enableMonitoringIntegration,
       logDirectory: this.config.logDirectory,
+      testCleanupRegistered: !!(
+        TestCleanupManager && process.env.NODE_ENV === 'test'
+      ),
     });
   }
 
@@ -1053,7 +1075,35 @@ class EnhancedErrorLogger {
       this.performMonitoringTasks();
     }, 60000); // Every minute
 
-    console.log('Monitoring integration started');
+    // Register interval with TestCleanupManager if available (test environment)
+    if (TestCleanupManager && process.env.NODE_ENV === 'test') {
+      TestCleanupManager.trackInterval(
+        this.monitoringInterval,
+        'EnhancedErrorLogger.startMonitoringIntegration'
+      );
+
+      // Register this instance for cleanup
+      TestCleanupManager.registerResource(
+        this,
+        'destroy',
+        'EnhancedErrorLogger'
+      );
+
+      // Register cleanup callback
+      TestCleanupManager.registerCleanupCallback(() => {
+        if (this.monitoringInterval) {
+          clearInterval(this.monitoringInterval);
+          this.monitoringInterval = null;
+        }
+      });
+    }
+
+    console.log('Monitoring integration started', {
+      intervalId: this.monitoringInterval,
+      testCleanupRegistered: !!(
+        TestCleanupManager && process.env.NODE_ENV === 'test'
+      ),
+    });
   }
 
   /**

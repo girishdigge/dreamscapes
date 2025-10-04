@@ -14,7 +14,7 @@ class ResponseCache {
       maxCacheSize: config.maxCacheSize || 10000,
       enableSemanticSimilarity: config.enableSemanticSimilarity !== false,
       similarityThreshold: config.similarityThreshold || 0.85,
-      connectionTimeout: config.connectionTimeout || 5000, // 5 seconds default
+      connectionTimeout: config.connectionTimeout || 2000, // 2 seconds default for tests
       ...config,
     };
 
@@ -62,11 +62,11 @@ class ResponseCache {
           if (options.total_retry_time > this.config.connectionTimeout) {
             return new Error('Retry time exhausted');
           }
-          if (options.attempt > 3) {
-            // Reduce retry attempts for faster failure
+          if (options.attempt > 1) {
+            // Reduce retry attempts for faster failure in tests
             return undefined;
           }
-          return Math.min(options.attempt * 100, 1000); // Shorter retry intervals
+          return Math.min(options.attempt * 50, 500); // Even shorter retry intervals
         },
       });
 
@@ -74,7 +74,13 @@ class ResponseCache {
         logger.error('Redis client error:', err);
         this.stats.errors++;
         // Set client to null on connection errors to trigger fallback
-        this.client = null;
+        if (
+          err.code === 'ECONNREFUSED' ||
+          err.code === 'ENOTFOUND' ||
+          err.message.includes('timeout')
+        ) {
+          this.client = null;
+        }
       });
 
       this.client.on('connect', () => {
@@ -96,7 +102,7 @@ class ResponseCache {
       await Promise.race([
         this.client.ping(),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Ping timeout')), 1000)
+          setTimeout(() => reject(new Error('Ping timeout')), 500)
         ),
       ]);
     } catch (error) {

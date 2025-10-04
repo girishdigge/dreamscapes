@@ -2,14 +2,14 @@
 // Demonstration of the automatic content repair system
 
 const ValidationPipeline = require('../engine/ValidationPipeline');
-const ContentRepair = require('../engine/ContentRepair');
+const { EnhancedContentRepair } = require('../../../shared');
 const RetryStrategies = require('../engine/RetryStrategies');
 
 async function demonstrateContentRepair() {
   console.log('🔧 Content Repair System Demonstration\n');
 
   const validationPipeline = new ValidationPipeline();
-  const contentRepair = new ContentRepair();
+  const contentRepair = new EnhancedContentRepair();
   const retryStrategies = new RetryStrategies();
 
   // Example 1: Malformed content with multiple issues
@@ -173,7 +173,7 @@ async function demonstrateContentRepair() {
       contentWithErrors,
       {
         provider: 'cerebras',
-        model: 'llama-4-maverick-17b',
+        model: 'cerebras',
         temperature: 0.7,
         originalPrompt: 'I dreamed of a magical forest',
       }

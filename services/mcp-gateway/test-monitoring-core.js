@@ -149,7 +149,7 @@ function setupTestRoutes(app, mockProviderManager) {
 
     // Start AI request tracking
     const aiRequestId = app.aiTracking.startAIRequest(provider, operation, {
-      model: 'llama-4-maverick-17b',
+      model: 'cerebras',
       temperature: 0.6,
       maxTokens: 1000,
       prompt: 'Test prompt',
@@ -158,7 +158,7 @@ function setupTestRoutes(app, mockProviderManager) {
     // Start monitoring request tracking
     const monitoringRequestId = app.aiTracking.recordRequestStart(provider, {
       operation,
-      model: 'llama-4-maverick-17b',
+      model: 'cerebras',
       inputTokens: 50,
     });
 

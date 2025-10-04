@@ -136,7 +136,7 @@ class ConfigLoader {
     return {
       apiKey: this.get('CEREBRAS_API_KEY'),
       apiUrl: this.get('CEREBRAS_API_URL', 'https://api.cerebras.ai/v1'),
-      model: this.get('CEREBRAS_MODEL', 'llama-4-maverick-17b-128e-instruct'),
+      model: this.get('CEREBRAS_MODEL', 'llama-3.3-70b'),
       temperature: this.getNumber('CEREBRAS_TEMPERATURE', 0.6),
       topP: this.getNumber('CEREBRAS_TOP_P', 0.9),
       maxTokens: this.getNumber('CEREBRAS_MAX_TOKENS', 32768),

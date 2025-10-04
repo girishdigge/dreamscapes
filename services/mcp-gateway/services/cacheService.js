@@ -35,11 +35,12 @@ class CacheService {
       // Initialize ResponseCache
       this.responseCache = new ResponseCache(this.config);
 
-      // Wait a moment for Redis connection
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // Wait a moment for Redis connection (shorter in test mode)
+      const waitTime = this.config.forceTestMode ? 100 : 1000;
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
 
       // Initialize CacheManager
-      this.cacheManager = new CacheManager(this.responseCache);
+      this.cacheManager = new CacheManager(this.responseCache, this.config);
 
       this.initialized = true;
       logger.info('Enhanced caching system initialized successfully');

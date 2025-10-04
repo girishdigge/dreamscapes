@@ -6,7 +6,7 @@ class ProviderCapabilityAdapter {
     this.providerProfiles = {
       cerebras: {
         name: 'cerebras',
-        model: 'llama-4-maverick-17b-128e-instruct',
+        model: 'llama-3.3-70b',
         capabilities: {
           max_tokens: 32768,
           context_window: 128000,

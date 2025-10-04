@@ -66,9 +66,17 @@ class ProviderSelectionStrategies {
       return providers[state.roundRobinIndex % providers.length];
     }
 
-    const selectedProvider =
-      healthyProviders[state.roundRobinIndex % healthyProviders.length];
+    const currentIndex = state.roundRobinIndex % healthyProviders.length;
+    const selectedProvider = healthyProviders[currentIndex];
     state.roundRobinIndex = (state.roundRobinIndex || 0) + 1;
+
+    // Add round-robin specific metadata
+    selectedProvider.selectionMetadata = {
+      reason: 'Round-robin rotation',
+      currentIndex: currentIndex,
+      totalProviders: healthyProviders.length,
+      nextIndex: state.roundRobinIndex % healthyProviders.length,
+    };
 
     return selectedProvider;
   }
@@ -296,12 +304,20 @@ class EnhancedLoadBalancer extends EventEmitter {
 
       // Add selection metadata
       const selectionMetadata = {
+        algorithm: strategy,
         strategy: strategy,
         selectionTime: Date.now(),
         responseTime: Date.now() - startTime,
         candidateCount: candidates.length,
         totalProviders: providers.length,
+        totalCandidates: candidates.length,
         score: selectedProvider.selectionScore || 0,
+        selectionTimestamp: Date.now(),
+        selectionReason: this.getSelectionReason(
+          selectedProvider,
+          candidates,
+          strategy
+        ),
       };
 
       // Record selection in history
@@ -609,6 +625,36 @@ class EnhancedLoadBalancer extends EventEmitter {
    */
   getAvailableStrategies() {
     return Object.keys(this.strategies);
+  }
+
+  /**
+   * Get selection reason based on strategy and provider
+   * @param {Object} selected - Selected provider
+   * @param {Array} candidates - Available candidates
+   * @param {string} strategy - Selection strategy used
+   * @returns {string} Selection reason
+   */
+  getSelectionReason(selected, candidates, strategy) {
+    switch (strategy) {
+      case 'weighted':
+        return `Selected based on weighted score: ${
+          selected.selectionScore || selected.score || 0
+        }`;
+      case 'round-robin':
+        return `Selected via round-robin rotation`;
+      case 'least-connections':
+        return `Selected for lowest connection count: ${
+          selected.activeConnections || 0
+        }`;
+      case 'fastest-response':
+        return `Selected for fastest response time: ${
+          selected.averageResponseTime || 0
+        }ms`;
+      case 'priority':
+        return `Selected based on priority: ${selected.priority || 0}`;
+      default:
+        return `Selected via ${strategy} algorithm`;
+    }
   }
 
   /**

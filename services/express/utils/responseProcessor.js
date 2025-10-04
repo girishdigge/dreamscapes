@@ -1,6 +1,10 @@
 // services/express/utils/responseProcessor.js
 const { logger } = require('./logger');
 const { validateDream } = require('../middleware/validation');
+const { createFallbackDream } = require('./fallbackGenerator');
+const { utils } = require('@dreamscapes/shared');
+const ProcessingPipeline = require('./processingPipeline');
+const PipelineErrorRecovery = require('./pipelineErrorRecovery');
 
 /**
  * Enhanced MCP Gateway response processor
@@ -9,6 +13,127 @@ const { validateDream } = require('../middleware/validation');
 class MCPResponseProcessor {
   constructor() {
     this.validationCache = new Map();
+    this.pipeline = this.initializePipeline();
+  }
+
+  /**
+   * Initialize the processing pipeline with validation checkpoints
+   */
+  initializePipeline() {
+    const pipeline = new ProcessingPipeline({ strictMode: false });
+
+    // Stage 1: Text Extraction
+    pipeline.addStage({
+      name: 'text_extraction',
+      process: async (response, context) => {
+        return await this.extractResponseText(response, context.requestId);
+      },
+      onError: async (error, previousData, context) => {
+        logger.error('Text extraction failed, cannot recover', {
+          requestId: context.requestId,
+          error: error.message,
+        });
+        throw error;
+      },
+    });
+
+    // Stage 2: JSON Parsing
+    pipeline.addStage({
+      name: 'json_parsing',
+      process: async (responseText, context) => {
+        return this.parseJsonResponse(responseText, context.requestId);
+      },
+      onError: async (error, previousData, context) => {
+        PipelineErrorRecovery.logRecoveryAttempt(
+          'json_parsing',
+          error,
+          context
+        );
+        return await PipelineErrorRecovery.recoverFromJsonParsing(
+          error,
+          previousData,
+          context
+        );
+      },
+    });
+
+    // Stage 3: Response Structure Validation
+    pipeline.addStage({
+      name: 'structure_validation',
+      process: async (parsedResponse, context) => {
+        return this.validateResponseStructure(
+          parsedResponse,
+          context.requestId
+        );
+      },
+      onError: async (error, previousData, context) => {
+        PipelineErrorRecovery.logRecoveryAttempt(
+          'structure_validation',
+          error,
+          context
+        );
+        return await PipelineErrorRecovery.recoverFromStructureValidation(
+          error,
+          previousData,
+          context
+        );
+      },
+    });
+
+    // Stage 4: Dream Data Extraction
+    pipeline.addStage({
+      name: 'dream_extraction',
+      process: async (validatedResponse, context) => {
+        const result = this.extractDreamData(
+          validatedResponse,
+          context.requestId,
+          context.originalText
+        );
+        // Store dataSource in context for later use
+        context.dataSource = result.dataSource;
+        // Return just the dreamData for the next stage
+        return result.dreamData;
+      },
+      onError: async (error, previousData, context) => {
+        PipelineErrorRecovery.logRecoveryAttempt(
+          'dream_extraction',
+          error,
+          context
+        );
+        return await PipelineErrorRecovery.recoverFromDreamExtraction(
+          error,
+          previousData,
+          context
+        );
+      },
+    });
+
+    // Stage 5: Dream Schema Validation
+    pipeline.addStage({
+      name: 'schema_validation',
+      process: async (dreamData, context) => {
+        // Reconstruct the result object with dataSource from context
+        const dreamDataResult = {
+          dreamData: dreamData,
+          dataSource: context.dataSource || 'unknown',
+        };
+        return this.validateDreamSchema(dreamDataResult, context.requestId);
+      },
+      onError: async (error, previousData, context) => {
+        PipelineErrorRecovery.logRecoveryAttempt(
+          'schema_validation',
+          error,
+          context
+        );
+        return await PipelineErrorRecovery.recoverFromSchemaValidation(
+          error,
+          previousData,
+          context
+        );
+      },
+    });
+
+    return pipeline;
   }
 
   /**
@@ -20,14 +145,79 @@ class MCPResponseProcessor {
    * @returns {Object} Processed response with dreamJson and metadata
    */
   async processResponse(response, requestId, responseTime, originalText) {
-    logger.info('Starting MCP Gateway response processing', {
+    logger.info('Starting MCP Gateway response processing with pipeline', {
       requestId,
       status: response.status,
       statusText: response.statusText,
       responseTime: `${responseTime}ms`,
       contentType: response.headers.get('content-type'),
       contentLength: response.headers.get('content-length'),
+      pipelineStages: this.pipeline.stages.length,
     });
+
+    try {
+      // Process through the validation pipeline
+      const pipelineResult = await this.pipeline.process(response, {
+        requestId,
+        originalText,
+        responseTime,
+      });
+
+      if (!pipelineResult.success) {
+        throw new Error(`Pipeline processing failed: ${pipelineResult.error}`);
+      }
+
+      const validatedDream = pipelineResult.data;
+
+      // Create final response object with pipeline metadata
+      const finalResponse = this.createProcessedResponse(
+        validatedDream,
+        { metadata: {} }, // Original response metadata
+        requestId,
+        responseTime
+      );
+
+      // Add pipeline information to response
+      finalResponse.pipeline = {
+        stagesCompleted: pipelineResult.stageResults.length,
+        validationCheckpoints: pipelineResult.validationResults.length,
+        totalProcessingTime: pipelineResult.processingTime,
+        stageResults: pipelineResult.stageResults,
+      };
+
+      logger.info('Pipeline processing completed successfully', {
+        requestId,
+        totalTime: `${pipelineResult.processingTime}ms`,
+        stagesCompleted: pipelineResult.stageResults.length,
+        validationsPassed: pipelineResult.validationResults.filter(
+          (v) => v.valid
+        ).length,
+      });
+
+      return finalResponse;
+    } catch (error) {
+      logger.error('Pipeline processing failed', {
+        requestId,
+        error: error.message,
+        stack: error.stack,
+      });
+
+      // Fall back to legacy processing if pipeline fails
+      logger.warn('Falling back to legacy processing', { requestId });
+      return await this.processResponseLegacy(
+        response,
+        requestId,
+        responseTime,
+        originalText
+      );
+    }
+  }
+
+  /**
+   * Legacy processing method (fallback)
+   */
+  async processResponseLegacy(response, requestId, responseTime, originalText) {
+    logger.info('Using legacy response processing', { requestId });
 
     // Step 1: Extract response text
     const responseText = await this.extractResponseText(response, requestId);
@@ -275,6 +465,19 @@ class MCPResponseProcessor {
       );
     }
 
+    // Ensure required fields are present - add them if missing
+    dreamData = this.ensureRequiredFields(dreamData, originalText, requestId);
+
+    // Clean up: Remove empty 'data' field if it exists (artifact from response wrapping)
+    if (
+      dreamData.data &&
+      typeof dreamData.data === 'object' &&
+      Object.keys(dreamData.data).length === 0
+    ) {
+      delete dreamData.data;
+      logger.debug('Removed empty data field from dream object', { requestId });
+    }
+
     // Log dream data structure
     logger.info('Dream data extracted successfully', {
       requestId,
@@ -324,8 +527,35 @@ class MCPResponseProcessor {
     }
 
     // Perform validation
+    logger.debug('Dream data before schema validation', {
+      requestId,
+      dreamData: JSON.stringify(dreamData, null, 2),
+      hasRequiredFields: {
+        id: !!dreamData.id,
+        title: !!dreamData.title,
+        style: !!dreamData.style,
+      },
+    });
+
+    console.log(
+      'dream data before schema validation in express/utils/responseProccessor',
+      dreamData
+    );
+
     const validation = validateDream(dreamData);
 
+    logger.debug('Dream validation result', {
+      requestId,
+      valid: validation.valid,
+      errorCount: validation.errors?.length || 0,
+      errors: validation.errors,
+      details: validation.details,
+    });
+
+    console.log(
+      'post validation in express/utils/responseProccessor',
+      validation
+    );
     // Cache validation result
     this.validationCache.set(cacheKey, validation);
 
@@ -367,9 +597,64 @@ class MCPResponseProcessor {
           });
         });
       }
+
+      // If validation still fails after ensuring required fields, create a fallback dream
+      if (
+        !validation.valid &&
+        validation.errors &&
+        validation.errors.length > 0
+      ) {
+        const hasRequiredFieldErrors = validation.errors.some(
+          (error) =>
+            error.includes('required property') &&
+            (error.includes('id') ||
+              error.includes('title') ||
+              error.includes('style'))
+        );
+
+        if (hasRequiredFieldErrors) {
+          logger.error(
+            'Critical validation failure - creating fallback dream',
+            {
+              requestId,
+              originalDreamId: dreamData.id,
+              errors: validation.errors,
+            }
+          );
+
+          // Create a fallback dream using the original text
+          const fallbackDream = createFallbackDream(
+            originalText || 'Emergency dream scene',
+            dreamData.style || 'ethereal',
+            { requestId }
+          );
+
+          logger.info('Fallback dream created successfully', {
+            requestId,
+            fallbackId: fallbackDream.id,
+            fallbackTitle: fallbackDream.title,
+            fallbackStyle: fallbackDream.style,
+            fallbackSource: fallbackDream.source, // Log the valid source enum
+          });
+
+          // Update the dream data and re-validate
+          dreamData = fallbackDream;
+          dataSource = 'fallback_generator';
+
+          // Re-validate the fallback dream
+          const fallbackValidation = validateDream(fallbackDream);
+          validation = fallbackValidation;
+
+          logger.info('Fallback dream validation result', {
+            requestId,
+            valid: fallbackValidation.valid,
+            errorCount: fallbackValidation.errors?.length || 0,
+          });
+        }
+      }
     }
 
-    return { ...dreamDataResult, validation };
+    return { dreamData, dataSource, validation };
   }
 
   /**
@@ -431,85 +716,47 @@ class MCPResponseProcessor {
   }
 
   /**
-   * Create a preview of response text for logging
+   * Create a preview of response text for logging (using shared utilities)
    */
   createResponsePreview(responseText, maxLength = 300) {
-    if (!responseText || responseText.length === 0) {
-      return '[empty]';
-    }
-
-    if (responseText.length <= maxLength) {
-      return responseText;
-    }
-
-    return (
-      responseText.substring(0, maxLength) +
-      `... [truncated, total length: ${responseText.length}]`
-    );
+    return utils.createResponsePreview(responseText, maxLength);
   }
 
   /**
-   * Identify common JSON parsing issues
+   * Identify common JSON parsing issues (using shared utilities)
    */
   identifyJsonIssues(responseText) {
-    const issues = [];
-
-    // Check for common issues
-    if (responseText.includes('undefined')) {
-      issues.push('Contains undefined values');
-    }
-
-    if (responseText.includes('NaN')) {
-      issues.push('Contains NaN values');
-    }
-
-    if (responseText.match(/,\s*[}\]]/)) {
-      issues.push('Trailing commas detected');
-    }
-
-    if (responseText.match(/[^\\]'/)) {
-      issues.push('Unescaped single quotes detected');
-    }
-
-    if (responseText.match(/\n|\r/)) {
-      issues.push('Contains unescaped newlines');
-    }
-
-    const openBraces = (responseText.match(/{/g) || []).length;
-    const closeBraces = (responseText.match(/}/g) || []).length;
-    if (openBraces !== closeBraces) {
-      issues.push(
-        `Mismatched braces: ${openBraces} open, ${closeBraces} close`
-      );
-    }
-
-    const openBrackets = (responseText.match(/\[/g) || []).length;
-    const closeBrackets = (responseText.match(/\]/g) || []).length;
-    if (openBrackets !== closeBrackets) {
-      issues.push(
-        `Mismatched brackets: ${openBrackets} open, ${closeBrackets} close`
-      );
-    }
-
-    return issues;
+    return utils.identifyJsonIssues(responseText);
   }
 
   /**
-   * Create cache key for validation results
+   * Ensure required fields are present in dream data (using shared utilities)
+   */
+  ensureRequiredFields(dreamData, originalText, requestId) {
+    const result = utils.ensureRequiredFields(dreamData, originalText);
+
+    if (!result) {
+      logger.error('Failed to ensure required fields', { requestId });
+      return dreamData;
+    }
+
+    if (result.modified) {
+      logger.info('Dream data was modified to ensure required fields', {
+        requestId,
+        dreamId: result.data.id,
+        title: result.data.title,
+        style: result.data.style,
+      });
+    }
+
+    return result.data;
+  }
+
+  /**
+   * Create cache key for validation results (using shared utilities)
    */
   createValidationCacheKey(dreamData) {
-    // Create a hash-like key based on dream structure
-    const keyData = {
-      id: dreamData.id,
-      title: dreamData.title,
-      style: dreamData.style,
-      structureCount: dreamData.structures?.length || 0,
-      entityCount: dreamData.entities?.length || 0,
-      hasEnvironment: !!dreamData.environment,
-      hasCinematography: !!dreamData.cinematography,
-    };
-
-    return JSON.stringify(keyData);
+    return utils.createValidationCacheKey(dreamData);
   }
 
   /**

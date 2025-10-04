@@ -15,6 +15,9 @@ const { createFallbackDream } = require('../utils/fallbackGenerator');
 const { logger } = require('../utils/logger');
 const { dreamProcessingLogger } = require('../utils/dreamProcessingLogger');
 const { responseProcessor } = require('../utils/responseProcessor');
+const {
+  enhancedResponseProcessor,
+} = require('../utils/enhancedResponseProcessor');
 const { serviceMonitor } = require('../utils/serviceMonitor');
 const {
   fetchWithRetry,
@@ -992,23 +995,96 @@ router.post('/parse-dream', async (req, res) => {
     if (cachedDream) {
       const cacheProcessingTime = Date.now() - startTime;
 
-      dreamProcessingLogger.logProcessingComplete(
-        requestId,
-        cachedDream,
-        'cache',
-        true,
-        { cached: true, totalTime: cacheProcessingTime }
-      );
+      // Apply enhanced validation even for cached dreams
+      try {
+        const enhancedResult =
+          await enhancedResponseProcessor.processAndValidate(
+            cachedDream,
+            {
+              requestId,
+              text: text.trim(),
+              style,
+              options,
+            },
+            {
+              includeDebug:
+                process.env.NODE_ENV === 'development' || options.debug,
+            }
+          );
 
-      // Record performance metrics for cached response
-      serviceMonitor.recordPerformance(cacheProcessingTime);
+        if (enhancedResult.success && enhancedResult.rendering.renderable) {
+          dreamProcessingLogger.logProcessingComplete(
+            requestId,
+            enhancedResult.dream,
+            'cache',
+            true,
+            { cached: true, totalTime: cacheProcessingTime }
+          );
 
-      return res.json({
-        success: true,
-        data: cachedDream,
-        cached: true,
-        processingTime: cacheProcessingTime,
-      });
+          // Record performance metrics for cached response
+          serviceMonitor.recordPerformance(cacheProcessingTime);
+
+          const response = {
+            success: true,
+            data: enhancedResult.dream,
+            cached: true,
+            processingTime: cacheProcessingTime,
+            metadata: {
+              validation: {
+                valid: enhancedResult.validation.valid,
+                errorCount: enhancedResult.validation.errorCount,
+              },
+              rendering: {
+                renderable: enhancedResult.rendering.renderable,
+              },
+            },
+          };
+
+          if (options.debug || process.env.NODE_ENV === 'development') {
+            response.debug = enhancedResult.debug;
+          }
+
+          return res.json(response);
+        } else {
+          // Cached dream failed validation, invalidate cache and regenerate
+          logger.warn('Cached dream failed enhanced validation, regenerating', {
+            requestId,
+            dreamId: cachedDream.id,
+            renderable: enhancedResult.rendering?.renderable,
+          });
+
+          // Clear invalid cache entry
+          dreamCache.delete(cacheKey);
+          dreamCache.delete(cachedDream.id);
+
+          // Continue to regenerate below
+        }
+      } catch (enhancedError) {
+        logger.warn(
+          'Enhanced validation failed for cached dream, using as-is',
+          {
+            requestId,
+            error: enhancedError.message,
+          }
+        );
+
+        dreamProcessingLogger.logProcessingComplete(
+          requestId,
+          cachedDream,
+          'cache',
+          true,
+          { cached: true, totalTime: cacheProcessingTime }
+        );
+
+        serviceMonitor.recordPerformance(cacheProcessingTime);
+
+        return res.json({
+          success: true,
+          data: cachedDream,
+          cached: true,
+          processingTime: cacheProcessingTime,
+        });
+      }
     }
 
     let dreamJson = null;
@@ -1035,6 +1111,13 @@ router.post('/parse-dream', async (req, res) => {
       mcpResponseTime = mcpResult.responseTime;
       mcpValidation = mcpResult.validation;
 
+      logger.info(
+        '------************---------------xxxxxxxxxxxxx------------------',
+        `dreamJson: ${dreamJson}
+    source: ${source}
+    mcpResponseTime: ${mcpResponseTime}
+    mcpValidation: ${mcpValidation}`
+      );
       if (dreamJson) {
         dreamProcessingLogger.logMCPSuccess(
           requestId,
@@ -1057,7 +1140,7 @@ router.post('/parse-dream', async (req, res) => {
     // Fallback to local generation if MCP failed
     if (!dreamJson) {
       dreamJson = createFallbackDream(text.trim(), style, options);
-      source = 'local_fallback';
+      source = dreamJson.source; // Use the source from the fallback dream (should be 'express')
 
       dreamProcessingLogger.logFallbackGeneration(
         requestId,
@@ -1111,7 +1194,7 @@ router.post('/parse-dream', async (req, res) => {
 
         if (!repairSuccess) {
           dreamJson = createFallbackDream(text.trim(), style, options);
-          source = 'safe_fallback';
+          source = dreamJson.source; // Use the source from the fallback dream (should be 'express')
           dreamProcessingLogger.logFallbackGeneration(
             requestId,
             'Dream repair failed - still has validation errors',
@@ -1142,7 +1225,7 @@ router.post('/parse-dream', async (req, res) => {
         );
 
         dreamJson = createFallbackDream(text.trim(), style, options);
-        source = 'safe_fallback';
+        source = dreamJson.source; // Use the source from the fallback dream (should be 'express')
         dreamProcessingLogger.logFallbackGeneration(
           requestId,
           'Dream repair threw an error',
@@ -1163,7 +1246,8 @@ router.post('/parse-dream', async (req, res) => {
     dreamJson.seed = dreamJson.seed || Math.floor(Math.random() * 1000000);
     dreamJson.created = dreamJson.created || new Date().toISOString();
     dreamJson.originalText = text.trim();
-    dreamJson.source = source;
+    // Only set source if not already set (fallback dreams already have valid source)
+    dreamJson.source = dreamJson.source || source;
 
     // Add generation metadata
     dreamJson.metadata = {
@@ -1254,6 +1338,113 @@ router.post('/parse-dream', async (req, res) => {
       );
     }
 
+    // Apply enhanced response processing with final validation
+    let finalResponse;
+    try {
+      const enhancedResult = await enhancedResponseProcessor.processAndValidate(
+        dreamJson,
+        {
+          requestId,
+          text: text.trim(),
+          style,
+          options,
+        },
+        {
+          includeDebug: process.env.NODE_ENV === 'development' || options.debug,
+        }
+      );
+
+      // If enhanced processing succeeded, use its result
+      if (enhancedResult.success) {
+        dreamJson = enhancedResult.dream;
+
+        // Log enhanced validation results
+        logger.info('Enhanced response processing completed', {
+          requestId,
+          dreamId: dreamJson.id,
+          validationPassed: enhancedResult.validation.valid,
+          renderable: enhancedResult.rendering.renderable,
+          repairApplied: enhancedResult.metadata.repairApplied,
+        });
+
+        // Update cache with validated dream if it was repaired
+        if (enhancedResult.metadata.repairApplied) {
+          try {
+            setToCache(cacheKey, dreamJson);
+            setToCache(dreamJson.id, dreamJson);
+            logger.info('Updated cache with repaired dream', {
+              requestId,
+              dreamId: dreamJson.id,
+            });
+          } catch (cacheUpdateError) {
+            logger.warn('Failed to update cache with repaired dream', {
+              requestId,
+              error: cacheUpdateError.message,
+            });
+          }
+        }
+
+        finalResponse = {
+          success: true,
+          data: dreamJson,
+          metadata: {
+            processingTime: Date.now() - startTime,
+            source,
+            cached: false,
+            validation: {
+              valid: enhancedResult.validation.valid,
+              errorCount: enhancedResult.validation.errorCount,
+            },
+            rendering: {
+              renderable: enhancedResult.rendering.renderable,
+              issueCount: enhancedResult.rendering.issues.length,
+            },
+            repairApplied: enhancedResult.metadata.repairApplied,
+          },
+        };
+
+        // Include debug info if requested
+        if (options.debug || process.env.NODE_ENV === 'development') {
+          finalResponse.debug = enhancedResult.debug;
+        }
+      } else {
+        // Enhanced processing failed, use original dream
+        logger.warn('Enhanced response processing failed, using original', {
+          requestId,
+          error: enhancedResult.error?.message,
+        });
+
+        finalResponse = {
+          success: true,
+          data: dreamJson,
+          metadata: {
+            processingTime: Date.now() - startTime,
+            source,
+            cached: false,
+            enhancedProcessingFailed: true,
+          },
+        };
+      }
+    } catch (enhancedError) {
+      // If enhanced processing throws, fall back to original response
+      logger.error('Enhanced response processing threw error', {
+        requestId,
+        error: enhancedError.message,
+        stack: enhancedError.stack,
+      });
+
+      finalResponse = {
+        success: true,
+        data: dreamJson,
+        metadata: {
+          processingTime: Date.now() - startTime,
+          source,
+          cached: false,
+          enhancedProcessingError: enhancedError.message,
+        },
+      };
+    }
+
     // Log successful completion
     dreamProcessingLogger.logProcessingComplete(
       requestId,
@@ -1272,15 +1463,7 @@ router.post('/parse-dream', async (req, res) => {
     // Record performance metrics in service monitor
     serviceMonitor.recordPerformance(finalProcessingTime);
 
-    res.json({
-      success: true,
-      data: dreamJson,
-      metadata: {
-        processingTime: finalProcessingTime,
-        source,
-        cached: false,
-      },
-    });
+    res.json(finalResponse);
   } catch (error) {
     const processingTime = Date.now() - startTime;
 
