@@ -106,6 +106,42 @@ module.exports = {
         maxStructures: 10,
         maxEntities: 5,
         requiredCinematography: true,
+        // Flexible type validation for structures
+        typeValidation: {
+          minLength: 2,
+          maxLength: 100,
+          pattern: /^[a-zA-Z0-9_-]+$/,
+          allowLegacyEnums: true,
+        },
+        // Legacy structure templates (for backward compatibility)
+        legacyStructureTemplates: [
+          'floating_library',
+          'crystal_tower',
+          'twisted_house',
+          'portal_arch',
+          'floating_island',
+          'infinite_staircase',
+        ],
+      },
+
+      // Entity validation
+      entity: {
+        // Flexible type validation for entities
+        typeValidation: {
+          minLength: 2,
+          maxLength: 100,
+          pattern: /^[a-zA-Z0-9_-]+$/,
+          allowLegacyEnums: true,
+        },
+        // Legacy entity types (for backward compatibility)
+        legacyEntityTypes: [
+          'book_swarm',
+          'floating_orbs',
+          'particle_stream',
+          'shadow_figures',
+          'light_butterflies',
+          'memory_fragments',
+        ],
       },
 
       // Style validation
@@ -117,26 +153,6 @@ module.exports = {
         fogRange: [0, 1],
         ambientLightRange: [0, 2],
       },
-
-      // Structure templates
-      structureTemplates: [
-        'floating_library',
-        'crystal_tower',
-        'twisted_house',
-        'portal_arch',
-        'floating_island',
-        'infinite_staircase',
-      ],
-
-      // Entity types
-      entityTypes: [
-        'book_swarm',
-        'floating_orbs',
-        'particle_stream',
-        'shadow_figures',
-        'light_butterflies',
-        'memory_fragments',
-      ],
     },
 
     videoParameters: {

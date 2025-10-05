@@ -1678,10 +1678,10 @@ app.post(
     try {
       const validationStart = Date.now();
 
-      // Run validation and repair pipeline
-      const pipelineResult = await validationPipeline.validateAndRepair(
+      // Run validation and repair pipeline using dream object validation
+      // The dream object has structures/entities, not scenes
+      const pipelineResult = await validationPipeline.validateDreamObject(
         finalParsed,
-        'dreamResponse',
         {
           originalPrompt: text,
           provider: source,
@@ -1689,15 +1689,60 @@ app.post(
         }
       );
 
-      validationResult = pipelineResult.validation;
-      repairResult = pipelineResult.repair;
-      finalContent = pipelineResult.finalContent;
+      // Extract validation result from dream object validation
+      validationResult = {
+        valid: pipelineResult.valid,
+        errors: pipelineResult.errors || [],
+        warnings: pipelineResult.warnings || [],
+        processingTime: pipelineResult.processingTime || 0,
+      };
+
+      // If validation failed, attempt repair
+      if (!pipelineResult.valid && validationPipeline.config.repair?.enabled) {
+        try {
+          repairResult = await validationPipeline.repairContent(
+            finalParsed,
+            pipelineResult.errors,
+            {
+              originalPrompt: text,
+              provider: source,
+              style: style,
+            }
+          );
+
+          if (repairResult.success && repairResult.repairedContent) {
+            // Re-validate repaired content
+            const revalidation = await validationPipeline.validateDreamObject(
+              repairResult.repairedContent,
+              {
+                originalPrompt: text,
+                provider: source,
+                style: style,
+              }
+            );
+
+            if (revalidation.valid) {
+              finalContent = repairResult.repairedContent;
+              validationResult = revalidation;
+            } else {
+              // Repair didn't fully fix issues, but use repaired content anyway
+              finalContent = repairResult.repairedContent;
+              validationResult = revalidation;
+            }
+          }
+        } catch (repairError) {
+          logger.warn('[mcp-gateway] Content repair failed', {
+            error: repairError.message,
+            source,
+          });
+        }
+      }
 
       // Add validation metadata
       finalContent.metadata = {
         ...finalContent.metadata,
         validation: {
-          valid: pipelineResult.success,
+          valid: validationResult.valid,
           errorsFound: validationResult?.errors?.length || 0,
           warningsFound: validationResult?.warnings?.length || 0,
           repairApplied: !!repairResult,

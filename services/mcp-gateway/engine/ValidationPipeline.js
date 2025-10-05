@@ -76,171 +76,36 @@ class ValidationPipeline {
    */
   initializeSchemas() {
     return {
-      // Dream response schema based on the design document
+      // Legacy dreamResponse schema - DEPRECATED
+      // Use UnifiedValidator.validateDreamObject() instead
+      // This schema is kept only for backward compatibility
       dreamResponse: Joi.object({
-        success: Joi.boolean().required(),
-        data: Joi.object({
-          id: Joi.string().required(),
-          title: Joi.string().min(1).max(200).required(),
-          description: Joi.string().min(10).max(2000).required(),
-          scenes: Joi.array()
-            .items(
-              Joi.object({
-                id: Joi.string().required(),
-                description: Joi.string().min(5).required(),
-                objects: Joi.array().items(Joi.object()).required(),
-                lighting: Joi.object().optional(),
-                camera: Joi.object().optional(),
-                environment: Joi.object().optional(),
-              })
-            )
-            .min(1)
-            .max(10)
-            .required(),
-          cinematography: Joi.object({
-            shots: Joi.array()
-              .items(
-                Joi.object({
-                  type: Joi.string()
-                    .valid(
-                      'establish',
-                      'flythrough',
-                      'orbit',
-                      'close_up',
-                      'pull_back'
-                    )
-                    .required(),
-                  target: Joi.string().optional(),
-                  duration: Joi.number().min(2).max(30).required(),
-                  startPos: Joi.array()
-                    .items(Joi.number())
-                    .length(3)
-                    .optional(),
-                  endPos: Joi.array().items(Joi.number()).length(3).optional(),
-                })
-              )
-              .required(),
-            transitions: Joi.array().items(Joi.object()).optional(),
-            effects: Joi.array().items(Joi.object()).optional(),
-            duration: Joi.number().min(1).required(),
-          }).optional(),
-          style: Joi.object({
-            visual: Joi.object().optional(),
-            audio: Joi.object().optional(),
-            mood: Joi.object().optional(),
-          }).optional(),
-        }).required(),
-        metadata: Joi.object({
-          source: Joi.string().required(),
-          model: Joi.string().required(),
-          processingTime: Joi.number().min(0).required(),
-          quality: Joi.string()
-            .valid('draft', 'standard', 'high', 'cinematic')
-            .required(),
-          tokens: Joi.object({
-            input: Joi.number().min(0).required(),
-            output: Joi.number().min(0).required(),
-            total: Joi.number().min(0).required(),
-          }).required(),
-          confidence: Joi.number().min(0).max(1).required(),
-          cacheHit: Joi.boolean().required(),
-        }).required(),
-      }),
+        success: Joi.boolean().optional(),
+        data: Joi.object().optional(),
+        metadata: Joi.object().optional(),
+        id: Joi.string().optional(),
+        title: Joi.string().optional(),
+        structures: Joi.array().optional(),
+        entities: Joi.array().optional(),
+        cinematography: Joi.object().optional(),
+      }).unknown(true), // Allow any additional fields for flexibility
 
-      // 3D Scene data schema based on docs/schema.json
+      // Legacy sceneData schema - DEPRECATED
+      // Use UnifiedValidator.validateDreamObject() instead
+      // This schema is kept only for backward compatibility with old tests
       sceneData: Joi.object({
         id: Joi.string().required(),
-        title: Joi.string().required(),
-        style: Joi.string()
-          .valid('ethereal', 'cyberpunk', 'surreal', 'fantasy', 'nightmare')
-          .required(),
-        seed: Joi.number().integer().optional(),
-        environment: Joi.object({
-          preset: Joi.string()
-            .valid('dawn', 'dusk', 'night', 'void', 'underwater')
-            .optional(),
-          fog: Joi.number().min(0).max(1).optional(),
-          skyColor: Joi.string()
-            .pattern(/^#[0-9a-fA-F]{6}$/)
-            .optional(),
-          ambientLight: Joi.number().min(0).max(2).optional(),
-        }).optional(),
-        structures: Joi.array()
-          .items(
-            Joi.object({
-              id: Joi.string().required(),
-              template: Joi.string()
-                .valid(
-                  'floating_library',
-                  'crystal_tower',
-                  'twisted_house',
-                  'portal_arch',
-                  'floating_island',
-                  'infinite_staircase'
-                )
-                .required(),
-              pos: Joi.array().items(Joi.number()).length(3).required(),
-              scale: Joi.number().min(0.1).max(10).optional(),
-              rotation: Joi.array().items(Joi.number()).length(3).optional(),
-              features: Joi.array().items(Joi.string()).optional(),
-            })
-          )
-          .max(10)
-          .optional(),
-        entities: Joi.array()
-          .items(
-            Joi.object({
-              id: Joi.string().required(),
-              type: Joi.string()
-                .valid(
-                  'book_swarm',
-                  'floating_orbs',
-                  'particle_stream',
-                  'shadow_figures',
-                  'light_butterflies',
-                  'memory_fragments'
-                )
-                .required(),
-              count: Joi.number().integer().min(1).max(100).optional(),
-              params: Joi.object({
-                speed: Joi.number().optional(),
-                glow: Joi.number().min(0).max(1).optional(),
-                size: Joi.number().optional(),
-                color: Joi.string().optional(),
-              }).optional(),
-            })
-          )
-          .max(5)
-          .optional(),
-        cinematography: Joi.object({
-          durationSec: Joi.number().min(10).max(120).required(),
-          shots: Joi.array()
-            .items(
-              Joi.object({
-                type: Joi.string()
-                  .valid(
-                    'establish',
-                    'flythrough',
-                    'orbit',
-                    'close_up',
-                    'pull_back'
-                  )
-                  .required(),
-                target: Joi.string().optional(),
-                duration: Joi.number().min(2).max(30).required(),
-                startPos: Joi.array().items(Joi.number()).length(3).optional(),
-                endPos: Joi.array().items(Joi.number()).length(3).optional(),
-              })
-            )
-            .required(),
-        }).required(),
-        render: Joi.object({
-          res: Joi.array().items(Joi.number().integer()).length(2).optional(),
-          fps: Joi.number().integer().valid(24, 30, 60).optional(),
-          quality: Joi.string().valid('draft', 'medium', 'high').optional(),
-        }).optional(),
-        assumptions: Joi.array().items(Joi.string()).optional(),
-      }),
+        title: Joi.string().optional(),
+        style: Joi.string().optional(),
+        structures: Joi.array().optional(),
+        entities: Joi.array().optional(),
+        cinematography: Joi.object().optional(),
+        environment: Joi.object().optional(),
+        render: Joi.object().optional(),
+        metadata: Joi.object().optional(),
+        created: Joi.string().optional(),
+        source: Joi.string().optional(),
+      }).unknown(true), // Allow any additional fields for flexibility
 
       // Video parameters schema
       videoParameters: Joi.object({
@@ -261,20 +126,22 @@ class ValidationPipeline {
 
   /**
    * Initialize quality assessment rules
+   * NOTE: These are legacy rules. UnifiedValidator provides comprehensive validation.
    */
   initializeQualityRules() {
     return {
       titleRelevance: {
         weight: 0.15,
         check: (content, originalPrompt) => {
-          if (!content.data?.title || !originalPrompt) return 0.5;
+          const title = content.title || content.data?.title;
+          if (!title || !originalPrompt) return 0.5;
 
-          const title = content.data.title.toLowerCase();
-          const prompt = originalPrompt.toLowerCase();
+          const titleLower = title.toLowerCase();
+          const promptLower = originalPrompt.toLowerCase();
 
-          // Simple keyword matching - could be enhanced with NLP
-          const titleWords = title.split(/\s+/);
-          const promptWords = prompt.split(/\s+/);
+          // Simple keyword matching
+          const titleWords = titleLower.split(/\s+/);
+          const promptWords = promptLower.split(/\s+/);
 
           const matches = titleWords.filter((word) =>
             promptWords.some(
@@ -286,70 +153,44 @@ class ValidationPipeline {
         },
       },
 
-      descriptionQuality: {
-        weight: 0.2,
+      structureQuality: {
+        weight: 0.25,
         check: (content) => {
-          const description = content.data?.description;
-          if (!description) return 0;
+          const structures = content.structures || content.data?.structures;
+          if (!structures || !Array.isArray(structures)) return 0;
 
           let score = 0;
 
-          // Length check
-          if (description.length >= 50) score += 0.3;
-          if (description.length >= 100) score += 0.2;
-
-          // Descriptive words check
-          const descriptiveWords = [
-            'vivid',
-            'ethereal',
-            'mysterious',
-            'glowing',
-            'floating',
-            'shimmering',
-          ];
-          const hasDescriptive = descriptiveWords.some((word) =>
-            description.toLowerCase().includes(word)
+          // Check if structures have required fields
+          const validStructures = structures.filter(
+            (s) => s.id && s.type && s.pos
           );
-          if (hasDescriptive) score += 0.3;
+          score += (validStructures.length / structures.length) * 0.5;
 
-          // Sentence structure
-          const sentences = description
-            .split(/[.!?]+/)
-            .filter((s) => s.trim().length > 0);
-          if (sentences.length >= 2) score += 0.2;
+          // Check for variety in structure types
+          const types = new Set(structures.map((s) => s.type));
+          if (types.size >= 1) score += 0.3;
+          if (types.size >= 2) score += 0.2;
 
           return Math.min(score, 1);
         },
       },
 
-      sceneConsistency: {
-        weight: 0.25,
+      entityQuality: {
+        weight: 0.2,
         check: (content) => {
-          const scenes = content.data?.scenes;
-          if (!scenes || !Array.isArray(scenes)) return 0;
+          const entities = content.entities || content.data?.entities;
+          if (!entities || !Array.isArray(entities)) return 0.5; // Optional
 
           let score = 0;
 
-          // Check if all scenes have required fields
-          const validScenes = scenes.filter(
-            (scene) => scene.id && scene.description && scene.objects
-          );
-          score += (validScenes.length / scenes.length) * 0.4;
+          // Check if entities have required fields
+          const validEntities = entities.filter((e) => e.id && e.type);
+          score += (validEntities.length / entities.length) * 0.6;
 
-          // Check scene descriptions quality
-          const qualityScenes = scenes.filter(
-            (scene) => scene.description && scene.description.length >= 20
-          );
-          score += (qualityScenes.length / scenes.length) * 0.3;
-
-          // Check for object consistency
-          const scenesWithObjects = scenes.filter(
-            (scene) =>
-              scene.objects &&
-              Array.isArray(scene.objects) &&
-              scene.objects.length > 0
-          );
-          score += (scenesWithObjects.length / scenes.length) * 0.3;
+          // Check for entity parameters
+          const entitiesWithParams = entities.filter((e) => e.params);
+          score += (entitiesWithParams.length / entities.length) * 0.4;
 
           return Math.min(score, 1);
         },
@@ -358,7 +199,8 @@ class ValidationPipeline {
       cinematographyQuality: {
         weight: 0.2,
         check: (content) => {
-          const cinematography = content.data?.cinematography;
+          const cinematography =
+            content.cinematography || content.data?.cinematography;
           if (!cinematography) return 0.3; // Optional but adds quality
 
           let score = 0;
@@ -378,7 +220,9 @@ class ValidationPipeline {
           }
 
           // Check duration
-          if (cinematography.duration && cinematography.duration >= 10) {
+          const duration =
+            cinematography.durationSec || cinematography.duration;
+          if (duration && duration >= 10) {
             score += 0.2;
           }
 
@@ -391,28 +235,23 @@ class ValidationPipeline {
         check: (content) => {
           let score = 0;
 
+          // Check for required dream object fields
+          const requiredFields = [
+            'id',
+            'title',
+            'structures',
+            'cinematography',
+          ];
+          const presentFields = requiredFields.filter(
+            (field) =>
+              content[field] !== undefined ||
+              content.data?.[field] !== undefined
+          );
+          score += (presentFields.length / requiredFields.length) * 0.6;
+
           // Check metadata presence
           if (content.metadata) {
-            const requiredMetadata = [
-              'source',
-              'model',
-              'processingTime',
-              'quality',
-              'tokens',
-            ];
-            const presentMetadata = requiredMetadata.filter(
-              (field) => content.metadata[field] !== undefined
-            );
-            score += (presentMetadata.length / requiredMetadata.length) * 0.4;
-          }
-
-          // Check data structure completeness
-          if (content.data) {
-            const requiredData = ['id', 'title', 'description', 'scenes'];
-            const presentData = requiredData.filter(
-              (field) => content.data[field] !== undefined
-            );
-            score += (presentData.length / requiredData.length) * 0.6;
+            score += 0.4;
           }
 
           return Math.min(score, 1);
@@ -511,86 +350,33 @@ class ValidationPipeline {
 
   /**
    * Content-specific validation beyond schema
+   * NOTE: This is legacy code. Use UnifiedValidator for new validations.
    */
   async validateContentSpecific(content, schemaType) {
     const errors = [];
     const warnings = [];
 
-    if (schemaType === 'dreamResponse') {
-      // Validate 3D scene data structure
-      if (content.data?.scenes) {
-        for (const [index, scene] of content.data.scenes.entries()) {
-          // Check for empty or invalid objects array
-          if (
-            !scene.objects ||
-            !Array.isArray(scene.objects) ||
-            scene.objects.length === 0
-          ) {
-            warnings.push({
-              field: `data.scenes[${index}].objects`,
-              message: 'Scene has no objects defined',
-              type: 'content_quality',
-              severity: 'warning',
-            });
-          }
+    // Legacy validation - most validation now handled by UnifiedValidator
+    // Keep minimal checks for backward compatibility
 
-          // Check for reasonable scene description length
-          if (scene.description && scene.description.length < 10) {
-            warnings.push({
-              field: `data.scenes[${index}].description`,
-              message: 'Scene description is too short',
-              type: 'content_quality',
-              severity: 'warning',
-            });
-          }
-        }
-      }
+    // Validate cinematography data if present
+    const cinematography =
+      content.cinematography || content.data?.cinematography;
+    if (cinematography) {
+      // Check total shot duration vs declared duration
+      if (cinematography.shots && cinematography.durationSec) {
+        const totalShotDuration = cinematography.shots.reduce(
+          (sum, shot) => sum + (shot.duration || 0),
+          0
+        );
 
-      // Validate cinematography data
-      if (content.data?.cinematography) {
-        const cinematography = content.data.cinematography;
-
-        // Check total shot duration vs declared duration
-        if (cinematography.shots && cinematography.duration) {
-          const totalShotDuration = cinematography.shots.reduce(
-            (sum, shot) => sum + (shot.duration || 0),
-            0
-          );
-
-          if (Math.abs(totalShotDuration - cinematography.duration) > 5) {
-            warnings.push({
-              field: 'data.cinematography.duration',
-              message: 'Total shot duration does not match declared duration',
-              type: 'content_consistency',
-              severity: 'warning',
-            });
-          }
-        }
-      }
-
-      // Validate metadata consistency
-      if (content.metadata) {
-        // Check confidence score reasonableness
-        if (content.metadata.confidence < 0.3) {
+        if (Math.abs(totalShotDuration - cinematography.durationSec) > 5) {
           warnings.push({
-            field: 'metadata.confidence',
-            message: 'Low confidence score indicates potential quality issues',
-            type: 'quality_warning',
+            field: 'cinematography.durationSec',
+            message: 'Total shot duration does not match declared duration',
+            type: 'content_consistency',
             severity: 'warning',
           });
-        }
-
-        // Check token usage reasonableness
-        if (content.metadata.tokens) {
-          if (content.metadata.tokens.output < 100) {
-            warnings.push({
-              field: 'metadata.tokens.output',
-              message:
-                'Very low output token count may indicate incomplete response',
-              type: 'completeness_warning',
-              severity: 'warning',
-            });
-          }
         }
       }
     }

@@ -1013,6 +1013,7 @@ class EnhancedContentRepair {
 
   /**
    * Fix structural issues
+   * Works with dream objects (structures/entities) not legacy scenes
    */
   async fixStructure(content, errors, options = {}) {
     const result = {
@@ -1025,129 +1026,68 @@ class EnhancedContentRepair {
     try {
       let structureFixed = false;
 
-      // Ensure data object exists and has correct structure
-      // Only add data wrapper if content is not already a dream object
+      // Determine if this is a dream object or wrapped in data
       const isDreamObject =
         result.content.id &&
         result.content.structures &&
-        result.content.entities;
+        result.content.cinematography;
 
-      if (!isDreamObject && !result.content.data) {
-        result.content.data = {};
+      // Work with the actual dream data
+      const dreamData = isDreamObject ? result.content : result.content.data;
+
+      if (!dreamData) {
+        // Create basic dream structure
+        result.content = {
+          id: result.content.id || uuidv4(),
+          title: result.content.title || 'Untitled Dream',
+          style: result.content.style || options.style || 'ethereal',
+          structures: [],
+          entities: [],
+          cinematography: {
+            durationSec: 30,
+            shots: [],
+          },
+          environment: {},
+          render: {},
+          metadata: result.content.metadata || {},
+        };
         structureFixed = true;
-      }
-
-      // Convert old scenes array to new dream structure
-      if (
-        result.content.data.scenes &&
-        Array.isArray(result.content.data.scenes)
-      ) {
-        // Convert scenes to dream structure
-        result.content.data.structures = [];
-        result.content.data.entities = [];
-
-        for (const scene of result.content.data.scenes) {
-          // Convert scene to structure
-          if (scene.environment) {
-            result.content.data.structures.push({
-              id: scene.id || `s${Date.now()}`,
-              type: scene.environment.type || 'floating_platform',
-              pos: scene.environment.position || [0, 20, 0],
-              rotation: scene.environment.rotation || [0, 0, 0],
-              scale: scene.environment.scale || [10, 1, 10],
-              features: scene.environment.features || ['glowing_edges'],
-            });
-          }
-
-          // Convert scene objects to entities
-          if (scene.objects && Array.isArray(scene.objects)) {
-            for (const obj of scene.objects) {
-              result.content.data.entities.push({
-                id: obj.id || `e${Date.now()}`,
-                type: obj.type || 'floating_orbs',
-                count: obj.count || 20,
-                params: obj.params || {
-                  speed: 1.0,
-                  glow: 0.5,
-                  size: 1.0,
-                  color: '#ffffff',
-                },
-              });
-            }
-          }
+      } else {
+        // Ensure required arrays exist
+        if (!dreamData.structures || !Array.isArray(dreamData.structures)) {
+          dreamData.structures = [];
+          structureFixed = true;
         }
 
-        // Set cinematography from first scene if available
-        const firstScene = result.content.data.scenes[0];
-        if (firstScene && firstScene.camera) {
-          result.content.data.cinematography = {
-            camera: firstScene.camera,
-            lighting: firstScene.lighting || {
-              type: 'ambient',
-              intensity: 0.7,
-            },
-            effects: firstScene.effects || [],
+        if (!dreamData.entities || !Array.isArray(dreamData.entities)) {
+          dreamData.entities = [];
+          structureFixed = true;
+        }
+
+        // Ensure cinematography exists with correct structure
+        if (!dreamData.cinematography) {
+          dreamData.cinematography = {
+            durationSec: 30,
+            shots: [],
           };
+          structureFixed = true;
+        } else if (!dreamData.cinematography.shots) {
+          dreamData.cinematography.shots = [];
+          structureFixed = true;
         }
-        // Note: If no camera data, leave cinematography undefined so fillMissingFields can generate it
 
-        // Remove old scenes array
-        delete result.content.data.scenes;
-        structureFixed = true;
-      }
-
-      // Ensure required dream structure arrays exist
-      if (
-        !result.content.data.structures ||
-        !Array.isArray(result.content.data.structures)
-      ) {
-        result.content.data.structures = [
-          {
-            id: `s${Date.now()}`,
-            type: 'floating_platform',
-            pos: [0, 20, 0],
-            rotation: [0, 0, 0],
-            scale: [10, 1, 10],
-            features: ['glowing_edges'],
-          },
-        ];
-        structureFixed = true;
-      }
-
-      if (
-        !result.content.data.entities ||
-        !Array.isArray(result.content.data.entities)
-      ) {
-        result.content.data.entities = [
-          {
-            id: `e${Date.now()}`,
-            type: 'floating_orbs',
-            count: 20,
-            params: {
-              speed: 1.0,
-              glow: 0.5,
-              size: 1.0,
-              color: '#ffffff',
-            },
-          },
-        ];
-        structureFixed = true;
-      }
-
-      // Note: Don't create cinematography here - let fillMissingFields handle it
-      // with proper durationSec and shots format
-
-      // Ensure metadata structure
-      if (!result.content.metadata) {
-        result.content.metadata = {};
-        structureFixed = true;
+        // Ensure metadata exists
+        if (!result.content.metadata) {
+          result.content.metadata = {};
+          structureFixed = true;
+        }
       }
 
       if (structureFixed) {
         result.success = true;
         result.warnings.push({
           type: 'structure_fixed',
-          message: 'Fixed structural issues and converted to dream format',
+          message: 'Fixed structural issues in dream object',
           severity: 'medium',
         });
 
@@ -1172,6 +1112,7 @@ class EnhancedContentRepair {
 
   /**
    * Fill missing required fields
+   * Works with dream objects (structures/entities) not legacy scenes
    */
   async fillMissingFields(content, errors, options = {}) {
     const result = {
@@ -1183,56 +1124,62 @@ class EnhancedContentRepair {
 
     try {
       let fieldsFilled = 0;
-      const prompt = options.prompt || '';
-      const style = options.style || result.content.data?.style || 'ethereal';
-      const usePromptContext = options.usePromptContext || false;
+      const prompt = options.originalPrompt || options.prompt || '';
 
-      // Fill missing data fields
-      if (!result.content.data.id) {
-        result.content.data.id = uuidv4();
+      // Determine if this is a dream object or wrapped in data
+      const isDreamObject =
+        result.content.id &&
+        result.content.structures &&
+        result.content.cinematography;
+
+      // Work with the actual dream data
+      const dreamData = isDreamObject ? result.content : result.content.data;
+
+      if (!dreamData) {
+        throw new Error('Cannot fill missing fields: no dream data found');
+      }
+
+      const style = options.style || dreamData.style || 'ethereal';
+      const usePromptContext = options.usePromptContext !== false; // Default to true
+
+      // Fill missing dream fields
+      if (!dreamData.id) {
+        dreamData.id = uuidv4();
         fieldsFilled++;
       }
 
-      if (!result.content.data.title) {
-        result.content.data.title =
+      if (!dreamData.title) {
+        dreamData.title =
           usePromptContext && prompt
-            ? `${prompt.substring(0, 50)}...`
+            ? prompt.substring(0, 50) + (prompt.length > 50 ? '...' : '')
             : 'Generated Dream Experience';
         fieldsFilled++;
       }
 
-      if (!result.content.data.style) {
-        result.content.data.style = style;
-        fieldsFilled++;
-      }
-
-      if (!result.content.data.description) {
-        result.content.data.description =
-          usePromptContext && prompt
-            ? prompt
-            : 'An immersive dreamscape experience with floating structures and ethereal entities.';
+      if (!dreamData.style) {
+        dreamData.style = style;
         fieldsFilled++;
       }
 
       // Generate or fill structures using prompt context
       if (
-        !result.content.data.structures ||
-        !Array.isArray(result.content.data.structures) ||
-        result.content.data.structures.length === 0
+        !dreamData.structures ||
+        !Array.isArray(dreamData.structures) ||
+        dreamData.structures.length === 0
       ) {
         if (usePromptContext && prompt) {
-          result.content.data.structures = this.generateStructuresFromPrompt(
+          dreamData.structures = this.generateStructuresFromPrompt(
             prompt,
             style,
             2
           );
-          fieldsFilled += result.content.data.structures.length;
+          fieldsFilled += dreamData.structures.length;
           this.logger.info('Generated structures from prompt context', {
-            count: result.content.data.structures.length,
+            count: dreamData.structures.length,
             style,
           });
         } else {
-          result.content.data.structures = [
+          dreamData.structures = [
             {
               id: `s${Date.now()}`,
               type: 'floating_platform',
@@ -1246,7 +1193,7 @@ class EnhancedContentRepair {
         }
       } else {
         // Validate and fill missing structure fields
-        for (const structure of result.content.data.structures) {
+        for (const structure of dreamData.structures) {
           if (!structure.id) {
             structure.id = `s${Date.now()}`;
             fieldsFilled++;
@@ -1276,23 +1223,23 @@ class EnhancedContentRepair {
 
       // Generate or fill entities using prompt context
       if (
-        !result.content.data.entities ||
-        !Array.isArray(result.content.data.entities) ||
-        result.content.data.entities.length === 0
+        !dreamData.entities ||
+        !Array.isArray(dreamData.entities) ||
+        dreamData.entities.length === 0
       ) {
         if (usePromptContext && prompt) {
-          result.content.data.entities = this.generateEntitiesFromPrompt(
+          dreamData.entities = this.generateEntitiesFromPrompt(
             prompt,
             style,
             2
           );
-          fieldsFilled += result.content.data.entities.length;
+          fieldsFilled += dreamData.entities.length;
           this.logger.info('Generated entities from prompt context', {
-            count: result.content.data.entities.length,
+            count: dreamData.entities.length,
             style,
           });
         } else {
-          result.content.data.entities = [
+          dreamData.entities = [
             {
               id: `e${Date.now()}`,
               type: 'floating_orbs',
@@ -1309,7 +1256,7 @@ class EnhancedContentRepair {
         }
       } else {
         // Validate and fill missing entity fields
-        for (const entity of result.content.data.entities) {
+        for (const entity of dreamData.entities) {
           if (!entity.id) {
             entity.id = `e${Date.now()}`;
             fieldsFilled++;
@@ -1337,23 +1284,22 @@ class EnhancedContentRepair {
 
       // Generate or fill cinematography using prompt context
       if (
-        !result.content.data.cinematography ||
-        typeof result.content.data.cinematography !== 'object'
+        !dreamData.cinematography ||
+        typeof dreamData.cinematography !== 'object'
       ) {
         if (usePromptContext) {
-          result.content.data.cinematography =
-            this.generateCinematographyFromPrompt(
-              prompt,
-              style,
-              result.content.data.structures
-            );
+          dreamData.cinematography = this.generateCinematographyFromPrompt(
+            prompt,
+            style,
+            dreamData.structures
+          );
           fieldsFilled++;
           this.logger.info('Generated cinematography from style context', {
             style,
-            shotCount: result.content.data.cinematography.shots.length,
+            shotCount: dreamData.cinematography.shots.length,
           });
         } else {
-          result.content.data.cinematography = {
+          dreamData.cinematography = {
             durationSec: 30,
             shots: [
               {
@@ -1910,25 +1856,49 @@ class EnhancedContentRepair {
 
       const dream = result.content.data;
 
-      // Apply enum repairs
+      // Apply enum repairs (for non-type fields like source, shot types, etc.)
       const repairResult = this.repairEnumViolations(dream, errors);
 
-      if (repairResult.repaired) {
+      // Apply flexible type repairs for structures and entities
+      let structureRepairResult = { repaired: false, repairs: [] };
+      let entityRepairResult = { repaired: false, repairs: [] };
+
+      if (dream.structures && Array.isArray(dream.structures)) {
+        structureRepairResult = this.repairStructures(dream.structures);
+      }
+
+      if (dream.entities && Array.isArray(dream.entities)) {
+        entityRepairResult = this.repairEntities(dream.entities);
+      }
+
+      // Combine all repairs
+      const allRepairs = [
+        ...repairResult.repairs,
+        ...structureRepairResult.repairs,
+        ...entityRepairResult.repairs,
+      ];
+
+      if (allRepairs.length > 0) {
         result.success = true;
         result.content.data = dream;
 
-        // Remove enum-related errors from remaining errors
+        // Remove enum-related and type-related errors from remaining errors
         result.remainingErrors = errors.filter((error) => {
           const isEnumError =
             error.error === 'INVALID_ENUM_VALUE' ||
             (typeof error === 'string' && error.includes('enum')) ||
             (error.message && error.message.includes('enum'));
 
+          const isTypeError =
+            error.error === 'INVALID_TYPE_FORMAT' ||
+            (typeof error === 'string' && error.includes('type')) ||
+            (error.message && error.message.includes('type'));
+
           // Keep errors that weren't repaired
-          if (!isEnumError) return true;
+          if (!isEnumError && !isTypeError) return true;
 
           const field = error.field || error.path;
-          const wasRepaired = repairResult.repairs.some(
+          const wasRepaired = allRepairs.some(
             (repair) => repair.field === field
           );
 
@@ -1936,14 +1906,17 @@ class EnhancedContentRepair {
         });
 
         // Add warnings for repairs made
-        repairResult.repairs.forEach((repair) => {
+        allRepairs.forEach((repair) => {
           result.warnings.push(
             `Repaired ${repair.field}: ${repair.originalValue} → ${repair.repairedValue}`
           );
         });
 
-        this.logger.info('[RepairStrategy] Enum repair completed', {
-          repairsCount: repairResult.repairs.length,
+        this.logger.info('[RepairStrategy] Enum and type repair completed', {
+          enumRepairsCount: repairResult.repairs.length,
+          structureRepairsCount: structureRepairResult.repairs.length,
+          entityRepairsCount: entityRepairResult.repairs.length,
+          totalRepairs: allRepairs.length,
           remainingErrors: result.remainingErrors.length,
         });
       }
@@ -2258,6 +2231,220 @@ class EnhancedContentRepair {
     });
 
     return newId;
+  }
+
+  /**
+   * Check if a type string is valid according to flexible type validation rules
+   * @param {string} typeString - The type string to validate
+   * @returns {boolean} True if valid, false otherwise
+   */
+  isValidTypeString(typeString) {
+    // Check if type is a non-empty string
+    if (!typeString || typeof typeString !== 'string') {
+      return false;
+    }
+
+    // Check length constraints (2-100 characters)
+    if (typeString.length < 2 || typeString.length > 100) {
+      return false;
+    }
+
+    // Check pattern: alphanumeric with underscores and hyphens only
+    const validPattern = /^[a-zA-Z0-9_-]+$/;
+    if (!validPattern.test(typeString)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Sanitize a type string to meet format requirements
+   * Handles empty types, too long types, special characters, and whitespace
+   * @param {string} typeString - The type string to sanitize
+   * @param {string} defaultType - Default type to use if empty ('unknown_structure' or 'unknown_entity')
+   * @returns {string} Sanitized type string
+   */
+  sanitizeTypeString(typeString, defaultType = 'unknown') {
+    // Handle empty or null types
+    if (
+      !typeString ||
+      typeof typeString !== 'string' ||
+      typeString.trim().length === 0
+    ) {
+      return defaultType;
+    }
+
+    // Start with trimmed string
+    let sanitized = typeString.trim();
+
+    // Replace whitespace with underscores
+    sanitized = sanitized.replace(/\s+/g, '_');
+
+    // Replace special characters (anything not alphanumeric, underscore, or hyphen) with underscores
+    sanitized = sanitized.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    // Remove consecutive underscores
+    sanitized = sanitized.replace(/_+/g, '_');
+
+    // Remove leading/trailing underscores or hyphens
+    sanitized = sanitized.replace(/^[_-]+|[_-]+$/g, '');
+
+    // Handle too long types - truncate to 100 chars
+    if (sanitized.length > 100) {
+      sanitized = sanitized.substring(0, 100);
+      // Remove trailing underscores or hyphens after truncation
+      sanitized = sanitized.replace(/[_-]+$/, '');
+    }
+
+    // If after sanitization we have less than 2 chars, use default
+    if (sanitized.length < 2) {
+      return defaultType;
+    }
+
+    return sanitized;
+  }
+
+  /**
+   * Repair structures to preserve valid flexible types
+   * Only repairs types if format is invalid
+   * @param {Array} structures - Array of structure objects
+   * @returns {Object} {repaired: boolean, repairs: Array}
+   */
+  repairStructures(structures) {
+    const repairs = [];
+
+    if (!structures || !Array.isArray(structures)) {
+      return { repaired: false, repairs: [] };
+    }
+
+    structures.forEach((structure, index) => {
+      if (!structure || !structure.type) {
+        // Missing type - add default
+        const originalValue = structure.type;
+        structure.type = 'unknown_structure';
+        repairs.push({
+          type: 'structure_type',
+          field: `structures[${index}].type`,
+          originalValue: originalValue || 'missing',
+          repairedValue: structure.type,
+          reason: 'Missing type replaced with default',
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
+      const originalType = structure.type;
+
+      // Check if type is already valid
+      if (this.isValidTypeString(originalType)) {
+        // Type is valid - preserve it as-is
+        return;
+      }
+
+      // Type format is invalid - sanitize it
+      const sanitizedType = this.sanitizeTypeString(
+        originalType,
+        'unknown_structure'
+      );
+
+      if (sanitizedType !== originalType) {
+        structure.type = sanitizedType;
+        repairs.push({
+          type: 'structure_type',
+          field: `structures[${index}].type`,
+          originalValue: originalType,
+          repairedValue: sanitizedType,
+          reason: 'Invalid type format sanitized',
+          timestamp: new Date().toISOString(),
+        });
+
+        this.logger.info('[TypeRepair] Sanitized structure type', {
+          field: `structures[${index}].type`,
+          structureIndex: index,
+          original: originalType,
+          repaired: sanitizedType,
+          reason: 'Invalid type format sanitized',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    return {
+      repaired: repairs.length > 0,
+      repairs,
+    };
+  }
+
+  /**
+   * Repair entities to preserve valid flexible types
+   * Only repairs types if format is invalid
+   * @param {Array} entities - Array of entity objects
+   * @returns {Object} {repaired: boolean, repairs: Array}
+   */
+  repairEntities(entities) {
+    const repairs = [];
+
+    if (!entities || !Array.isArray(entities)) {
+      return { repaired: false, repairs: [] };
+    }
+
+    entities.forEach((entity, index) => {
+      if (!entity || !entity.type) {
+        // Missing type - add default
+        const originalValue = entity.type;
+        entity.type = 'unknown_entity';
+        repairs.push({
+          type: 'entity_type',
+          field: `entities[${index}].type`,
+          originalValue: originalValue || 'missing',
+          repairedValue: entity.type,
+          reason: 'Missing type replaced with default',
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
+      const originalType = entity.type;
+
+      // Check if type is already valid
+      if (this.isValidTypeString(originalType)) {
+        // Type is valid - preserve it as-is
+        return;
+      }
+
+      // Type format is invalid - sanitize it
+      const sanitizedType = this.sanitizeTypeString(
+        originalType,
+        'unknown_entity'
+      );
+
+      if (sanitizedType !== originalType) {
+        entity.type = sanitizedType;
+        repairs.push({
+          type: 'entity_type',
+          field: `entities[${index}].type`,
+          originalValue: originalType,
+          repairedValue: sanitizedType,
+          reason: 'Invalid type format sanitized',
+          timestamp: new Date().toISOString(),
+        });
+
+        this.logger.info('[TypeRepair] Sanitized entity type', {
+          field: `entities[${index}].type`,
+          entityIndex: index,
+          original: originalType,
+          repaired: sanitizedType,
+          reason: 'Invalid type format sanitized',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    return {
+      repaired: repairs.length > 0,
+      repairs,
+    };
   }
 }
 

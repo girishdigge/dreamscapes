@@ -228,7 +228,8 @@ describe('DreamSchema', () => {
 
     test('should validate individual structure fields', () => {
       const dream = createValidDream();
-      dream.structures[0].type = 'invalid-type';
+      // Use a type with special characters that violates the pattern
+      dream.structures[0].type = 'invalid type!';
 
       const result = DreamSchema.validate(dream);
       const typeError = result.errors.find((e) =>
@@ -236,7 +237,7 @@ describe('DreamSchema', () => {
       );
 
       expect(typeError).toBeDefined();
-      expect(typeError.error).toBe('INVALID_ENUM_VALUE');
+      expect(typeError.error).toBe('PATTERN_MISMATCH');
     });
 
     test('should reject structure with invalid position array', () => {

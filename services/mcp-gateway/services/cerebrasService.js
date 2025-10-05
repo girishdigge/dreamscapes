@@ -1,3 +1,5 @@
+const PromptAnalyzer = require('./PromptAnalyzer');
+
 /**
  * Cerebras Service for dream generation
  *
@@ -11,6 +13,7 @@ class CerebrasService {
       throw new Error('Cerebras API key is required');
     }
     this.config = config;
+    this.promptAnalyzer = new PromptAnalyzer();
   }
 
   getConfig() {
@@ -99,17 +102,23 @@ class CerebrasService {
     const { v4: uuidv4 } = require('uuid');
     const { EnumMapper, ParameterValidator } = require('../../../shared');
 
-    // Extract style from prompt or use default
-    const styleMatch = prompt.match(/style:\s*(\w+)/i);
-    const requestedStyle = styleMatch
-      ? styleMatch[1].toLowerCase()
-      : 'ethereal';
+    // Extract style from options or prompt
+    const requestedStyle = options.style || 'ethereal';
 
-    // Extract dream description from prompt
-    const dreamMatch = prompt.match(/User dream:\s*(.+?)(?:\n|$)/i);
-    const dreamDescription = dreamMatch
-      ? dreamMatch[1].trim()
-      : 'A mysterious dreamscape';
+    // Use the prompt directly as the dream description
+    // Remove any "User dream:" or "style:" prefixes if present
+    let dreamDescription = prompt.trim();
+
+    // Remove "User dream:" prefix if present
+    const dreamMatch = dreamDescription.match(/User dream:\s*(.+?)(?:\n|$)/i);
+    if (dreamMatch) {
+      dreamDescription = dreamMatch[1].trim();
+    }
+
+    // Remove "style:" suffix if present
+    dreamDescription = dreamDescription
+      .replace(/\s*style:\s*\w+\s*$/i, '')
+      .trim();
 
     // Generate title from description (first 50 chars)
     const title =
@@ -120,32 +129,29 @@ class CerebrasService {
     // Validate style
     const validatedStyle = this._validateStyle(requestedStyle);
 
-    // Extract keywords from prompt for intelligent generation
-    const keywords = this._extractPromptKeywords(dreamDescription);
+    // Extract keywords from prompt for intelligent generation using PromptAnalyzer
+    const analysis = this.promptAnalyzer.analyze(dreamDescription);
 
     console.log('🔍 Extracted keywords from prompt:', {
-      structureMatches: Object.entries(keywords.structures).filter(
-        ([_, count]) => count > 0
-      ),
-      entityMatches: Object.entries(keywords.entities).filter(
-        ([_, count]) => count > 0
-      ),
-      styleMatches: Object.entries(keywords.styles).filter(
-        ([_, count]) => count > 0
-      ),
-      wordCount: keywords.wordCount,
+      entities: analysis.entities,
+      actions: analysis.actions,
+      locations: analysis.locations,
+      quantities: analysis.quantities,
+      mood: analysis.mood,
+      timeOfDay: analysis.timeOfDay,
+      confidence: analysis.confidence,
     });
 
     // Generate structures and entities first
     const structures = this._generateStructuresFromPrompt(
       dreamDescription,
       validatedStyle,
-      keywords
+      analysis
     );
     const entities = this._generateEntitiesFromPrompt(
       dreamDescription,
       validatedStyle,
-      keywords
+      analysis
     );
 
     // Create a dream structure based on the prompt content
@@ -351,110 +357,31 @@ class CerebrasService {
   }
 
   /**
-   * Extract keywords from prompt for structure generation
-   * @param {string} prompt - User prompt
-   * @returns {Object} Extracted keywords and context
-   * @private
-   */
-  _extractPromptKeywords(prompt) {
-    const lowerPrompt = prompt.toLowerCase();
-
-    // Structure type keywords
-    const structureKeywords = {
-      library: ['library', 'books', 'shelves', 'reading'],
-      tower: ['tower', 'spire', 'tall', 'vertical'],
-      house: ['house', 'home', 'building', 'dwelling'],
-      arch: ['arch', 'portal', 'gateway', 'door'],
-      island: ['island', 'floating', 'suspended', 'hovering'],
-      staircase: ['stair', 'steps', 'ladder', 'ascend'],
-      platform: ['platform', 'stage', 'floor', 'ground'],
-      crystal: ['crystal', 'gem', 'glass', 'transparent'],
-      tree: ['tree', 'forest', 'nature', 'organic'],
-      sculpture: ['sculpture', 'art', 'abstract', 'geometric'],
-    };
-
-    // Entity type keywords
-    const entityKeywords = {
-      books: ['book', 'pages', 'text', 'reading'],
-      orbs: ['orb', 'sphere', 'ball', 'light'],
-      butterflies: ['butterfly', 'butterflies', 'moth', 'wings', 'flying'],
-      particles: ['particle', 'dust', 'sparkle', 'glitter'],
-      shadows: ['shadow', 'dark', 'silhouette', 'figure'],
-      memories: ['memory', 'thought', 'dream', 'vision'],
-      crystals: ['crystal', 'shard', 'fragment', 'prism'],
-    };
-
-    // Style indicators
-    const styleIndicators = {
-      ethereal: ['ethereal', 'dreamy', 'soft', 'gentle', 'floating'],
-      cyberpunk: ['cyber', 'neon', 'tech', 'digital', 'futuristic'],
-      surreal: ['surreal', 'strange', 'weird', 'unusual', 'bizarre'],
-      fantasy: ['fantasy', 'magic', 'mystical', 'enchanted', 'mythical'],
-      nightmare: ['nightmare', 'dark', 'scary', 'horror', 'eerie'],
-    };
-
-    // Count keyword matches
-    const structureMatches = {};
-    const entityMatches = {};
-    const styleMatches = {};
-
-    for (const [type, keywords] of Object.entries(structureKeywords)) {
-      structureMatches[type] = keywords.filter((kw) =>
-        lowerPrompt.includes(kw)
-      ).length;
-    }
-
-    for (const [type, keywords] of Object.entries(entityKeywords)) {
-      entityMatches[type] = keywords.filter((kw) =>
-        lowerPrompt.includes(kw)
-      ).length;
-    }
-
-    for (const [style, keywords] of Object.entries(styleIndicators)) {
-      styleMatches[style] = keywords.filter((kw) =>
-        lowerPrompt.includes(kw)
-      ).length;
-    }
-
-    return {
-      structures: structureMatches,
-      entities: entityMatches,
-      styles: styleMatches,
-      promptLength: prompt.length,
-      wordCount: prompt.split(/\s+/).length,
-    };
-  }
-
-  /**
    * Map keywords to structure types
    * @param {Object} keywords - Extracted keywords
    * @param {string} style - Dream style
    * @returns {Array} Structure type mappings
    * @private
    */
-  _mapKeywordsToStructures(keywords, style) {
-    const structureTypeMap = {
-      library: 'floating_library',
-      tower: 'crystal_tower',
-      house: 'twisted_house',
-      arch: 'portal_arch',
-      island: 'floating_island',
-      staircase: 'infinite_staircase',
-      platform: 'floating_platform',
-      crystal: 'crystal_spire',
-      tree: 'organic_tree',
-      sculpture: 'abstract_sculpture',
-    };
+  _mapAnalysisToStructures(analysis, style) {
+    const structureTypes = [];
 
-    // Get top matching structure types
-    const sortedMatches = Object.entries(keywords.structures)
-      .filter(([_, count]) => count > 0)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3);
+    // Use entities that could be structures (like stars, buildings, etc.)
+    for (const entity of analysis.entities) {
+      // Check if this entity could be a structure
+      if (this._isStructuralEntity(entity)) {
+        structureTypes.push(entity);
+      }
+    }
 
-    // If we have matches, use them
-    if (sortedMatches.length > 0) {
-      return sortedMatches.map(([type]) => structureTypeMap[type]);
+    // Use locations as structure inspiration
+    for (const location of analysis.locations) {
+      structureTypes.push(location);
+    }
+
+    // If we have specific structure types, use them
+    if (structureTypes.length > 0) {
+      return structureTypes.slice(0, 3); // Limit to 3 structures
     }
 
     // Otherwise, use style-based defaults
@@ -470,39 +397,116 @@ class CerebrasService {
   }
 
   /**
+   * Check if an entity could be used as a structure
+   * @param {string} entity - Entity name
+   * @returns {boolean} True if entity could be a structure
+   * @private
+   */
+  _isStructuralEntity(entity) {
+    const structuralEntities = [
+      'star',
+      'stars',
+      'planet',
+      'planets',
+      'moon',
+      'moons',
+      'house',
+      'houses',
+      'tower',
+      'towers',
+      'castle',
+      'castles',
+      'building',
+      'buildings',
+      'library', // ✅ Added library
+      'libraries',
+      'tree',
+      'trees',
+      'rock',
+      'rocks',
+      'crystal',
+      'crystals',
+      'mountain',
+      'mountains',
+      'temple',
+      'temples',
+      'palace',
+      'palaces',
+      'bridge',
+      'bridges',
+      'arch',
+      'arches',
+      'gate',
+      'gates',
+      'pillar',
+      'pillars',
+      'statue',
+      'statues',
+      'monument',
+      'monuments',
+    ];
+    return structuralEntities.includes(entity);
+  }
+
+  /**
    * Generate structures based on prompt content with intelligent keyword extraction
    * @param {string} description - Dream description
    * @param {string} style - Dream style
-   * @param {Object} keywords - Extracted keywords (optional)
+   * @param {Object} analysis - Extracted analysis (optional)
    * @returns {Array} Structures array
    * @private
    */
   _generateStructuresFromPrompt(
     description,
     style = 'ethereal',
-    keywords = null
+    analysis = null
   ) {
-    // Extract keywords if not provided
-    if (!keywords) {
-      keywords = this._extractPromptKeywords(description);
+    // Extract analysis if not provided
+    if (!analysis) {
+      analysis = this.promptAnalyzer.analyze(description);
     }
 
-    // Map keywords to structure types
-    const structureTypes = this._mapKeywordsToStructures(keywords, style);
+    // Map analysis to structure types - use entities that could be structures
+    const structureTypes = this._mapAnalysisToStructures(analysis, style);
 
-    // Determine structure count based on prompt complexity
-    const baseCount = Math.min(
-      Math.max(1, Math.floor(keywords.wordCount / 10)),
-      5
-    );
-    const structureCount = Math.min(structureTypes.length, baseCount);
+    // Determine structure count based on quantities in prompt
+    let structureCount = 1; // Default to 1
+
+    // Check if we have explicit quantities for structural entities
+    if (analysis.quantities && Object.keys(analysis.quantities).length > 0) {
+      // Sum up quantities for structural entities
+      let totalStructuralCount = 0;
+      for (const [entity, count] of Object.entries(analysis.quantities)) {
+        if (this._isStructuralEntity(entity)) {
+          totalStructuralCount += count;
+        }
+      }
+
+      if (totalStructuralCount > 0) {
+        structureCount = Math.min(totalStructuralCount, 10); // Cap at 10 structures
+        console.log(
+          `🔢 Using quantity from prompt: ${structureCount} structures`
+        );
+      }
+    }
+
+    // If no quantities found, use word count heuristic
+    if (structureCount === 1 && !analysis.quantities) {
+      const wordCount = description.split(/\s+/).length;
+      const baseCount = Math.min(Math.max(1, Math.floor(wordCount / 10)), 5);
+      structureCount = Math.min(structureTypes.length, baseCount);
+    }
 
     const structures = [];
 
+    // Generate structures based on count
     for (let i = 0; i < structureCount; i++) {
-      const type = structureTypes[i] || structureTypes[0];
-      const angle = (i / structureCount) * Math.PI * 2;
-      const distance = 20 + Math.random() * 30;
+      const type =
+        structureTypes[i % structureTypes.length] || structureTypes[0];
+
+      // Position structures in a circle or pattern
+      const angle = (i / Math.max(structureCount, 2)) * Math.PI * 2;
+      const distance = structureCount > 1 ? 20 + Math.random() * 15 : 0;
 
       // Generate style-appropriate features
       const features = this._generateStructureFeatures(type, style);
@@ -533,6 +537,7 @@ class CerebrasService {
       });
     }
 
+    console.log(`✅ Generated ${structures.length} structures from prompt`);
     return structures;
   }
 
@@ -567,47 +572,91 @@ class CerebrasService {
    * @returns {Array} Entity type mappings
    * @private
    */
-  _mapKeywordsToEntities(keywords, style) {
-    const entityTypeMap = {
+  _mapAnalysisToEntities(analysis, style) {
+    const entityTypes = [];
+
+    // Check for action-specific entities first (for better context)
+    if (analysis.actions && analysis.actions.length > 0) {
+      if (
+        analysis.actions.includes('collid') ||
+        analysis.actions.includes('explod')
+      ) {
+        // For collisions/explosions, use particle effects
+        return ['particle_stream', 'particle_swarm'];
+      }
+      if (
+        analysis.actions.includes('fly') ||
+        analysis.actions.includes('soar')
+      ) {
+        // For flying, use appropriate entities
+        return ['light_butterfly', 'particle_stream'];
+      }
+      if (
+        analysis.actions.includes('orbit') ||
+        analysis.actions.includes('spin')
+      ) {
+        // For orbiting, use orbital particles
+        return ['floating_orb', 'particle_stream'];
+      }
+    }
+
+    // Entity type mappings for better 3D representation
+    const entityMappings = {
+      book: 'book_swarm',
       books: 'book_swarm',
-      orbs: 'floating_orbs',
-      butterflies: 'light_butterflies',
+      bird: 'light_butterfly',
+      birds: 'light_butterfly',
+      butterfly: 'light_butterfly',
+      butterflies: 'light_butterfly',
+      particle: 'particle_stream',
       particles: 'particle_stream',
-      shadows: 'shadow_figures',
-      memories: 'memory_fragments',
-      crystals: 'crystal_shards',
+      orb: 'floating_orb',
+      orbs: 'floating_orbs',
+      shadow: 'shadow_figure',
+      shadows: 'shadow_figure',
+      memory: 'memory_fragment',
+      memories: 'memory_fragment',
+      light: 'light_particle',
+      lights: 'light_particle',
+      fish: 'particle_swarm',
+      cloud: 'particle_stream',
+      clouds: 'particle_stream',
     };
 
-    // Get top matching entity types
-    const sortedMatches = Object.entries(keywords.entities)
-      .filter(([_, count]) => count > 0)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 2);
+    // Use entities that are not structures
+    for (const entity of analysis.entities) {
+      if (!this._isStructuralEntity(entity)) {
+        // Map to appropriate 3D entity type
+        const mappedType = entityMappings[entity] || entity;
+        entityTypes.push(mappedType);
+      }
+    }
 
-    // If we have matches, use them
-    if (sortedMatches.length > 0) {
-      return sortedMatches.map(([type]) => entityTypeMap[type]);
+    // If we have specific entity types, use them
+    if (entityTypes.length > 0) {
+      return entityTypes.slice(0, 2); // Limit to 2 entity types
     }
 
     // Otherwise, use style-based defaults
     const styleDefaults = {
-      ethereal: ['floating_orbs', 'light_butterflies'],
-      cyberpunk: ['particle_stream', 'geometric_shapes'],
-      surreal: ['memory_fragments', 'shadow_figures'],
-      fantasy: ['light_butterflies', 'floating_orbs'],
-      nightmare: ['shadow_figures', 'particle_swarm'],
+      ethereal: ['floating_orb', 'light_particle'],
+      cyberpunk: ['particle_stream', 'geometric_shape'],
+      surreal: ['memory_fragment', 'shadow_figure'],
+      fantasy: ['light_butterfly', 'floating_orb'],
+      nightmare: ['shadow_figure', 'particle_swarm'],
     };
 
     return styleDefaults[style] || styleDefaults.ethereal;
   }
 
   /**
-   * Generate entity parameters based on style
+   * Generate entity parameters based on style and actions
    * @param {string} style - Dream style
+   * @param {string[]} actions - Actions from prompt analysis
    * @returns {Object} Entity parameters
    * @private
    */
-  _generateEntityParams(style) {
+  _generateEntityParams(style, actions = []) {
     const { ParameterValidator } = require('../../../shared');
 
     // Generate raw parameters based on style
@@ -645,6 +694,21 @@ class CerebrasService {
     };
 
     const rawParams = styleParams[style] || styleParams.ethereal;
+
+    // Modify parameters based on actions
+    if (actions.includes('colliding') || actions.includes('collision')) {
+      rawParams.speed *= 2.0; // Increase speed for collisions
+      rawParams.glow *= 1.5; // Increase glow for impact
+    }
+    if (actions.includes('running') || actions.includes('moving')) {
+      rawParams.speed *= 1.5;
+    }
+    if (actions.includes('flying') || actions.includes('soaring')) {
+      rawParams.speed *= 1.2;
+    }
+    if (actions.includes('glowing') || actions.includes('shining')) {
+      rawParams.glow *= 1.3;
+    }
 
     // Validate and clamp parameters to ensure they're within valid ranges
     // Using default entity type constraints since we don't know the specific type yet
@@ -694,45 +758,47 @@ class CerebrasService {
   _generateEntitiesFromPrompt(
     description,
     style = 'ethereal',
-    keywords = null
+    analysis = null
   ) {
-    // Extract keywords if not provided
-    if (!keywords) {
-      keywords = this._extractPromptKeywords(description);
+    // Extract analysis if not provided
+    if (!analysis) {
+      analysis = this.promptAnalyzer.analyze(description);
     }
 
-    // Map keywords to entity types
-    const entityTypes = this._mapKeywordsToEntities(keywords, style);
+    // Map analysis to entity types - use entities that are not structures
+    const entityTypes = this._mapAnalysisToEntities(analysis, style);
 
     // Determine entity count based on prompt complexity
-    const baseCount = Math.min(
-      Math.max(1, Math.floor(keywords.wordCount / 15)),
-      3
-    );
+    const wordCount = description.split(/\s+/).length;
+    const baseCount = Math.min(Math.max(1, Math.floor(wordCount / 15)), 3);
     const entityCount = Math.min(entityTypes.length, baseCount);
 
     const entities = [];
 
     for (let i = 0; i < entityCount; i++) {
       const type = entityTypes[i] || entityTypes[0];
-      const params = this._generateEntityParams(style);
+      const params = this._generateEntityParams(style, analysis.actions);
 
-      // Adjust count based on entity type
-      const countRanges = {
-        book_swarm: [10, 30],
-        floating_orbs: [15, 40],
-        light_butterflies: [20, 50],
-        particle_stream: [30, 80],
-        shadow_figures: [5, 15],
-        memory_fragments: [10, 25],
-        crystal_shards: [15, 35],
-        particle_swarm: [40, 100],
-        geometric_shapes: [10, 30],
-      };
+      // Use quantity from analysis if available, otherwise use defaults
+      let count = analysis.quantities[type] || 1;
 
-      const [minCount, maxCount] = countRanges[type] || [15, 35];
-      const count =
-        minCount + Math.floor(Math.random() * (maxCount - minCount));
+      // If no specific quantity, use reasonable defaults based on entity type
+      if (count === 1 && !analysis.quantities[type]) {
+        const defaultCounts = {
+          star: 2, // For "stars" plural
+          book_swarm: 25, // Books floating around
+          particle_stream: 50,
+          particle_swarm: 40,
+          floating_orb: 20,
+          floating_orbs: 20,
+          light_butterfly: 15,
+          light_particle: 30,
+          shadow_figure: 8,
+          memory_fragment: 12,
+          geometric_shape: 15,
+        };
+        count = defaultCounts[type] || Math.floor(Math.random() * 20) + 10;
+      }
 
       entities.push({
         id: `e${i + 1}`,
@@ -780,10 +846,81 @@ class CerebrasService {
     const entityTargets =
       entities.length > 0 ? entities.map((e) => e.id) : ['e1'];
 
-    if (duration <= 20) {
+    // Analyze description for action keywords
+    const lowerDesc = description.toLowerCase();
+    const hasOrbiting =
+      lowerDesc.includes('orbit') || lowerDesc.includes('orbiting');
+    const hasColliding =
+      lowerDesc.includes('collid') || lowerDesc.includes('crash');
+    const hasExploding =
+      lowerDesc.includes('explod') || lowerDesc.includes('explosion');
+    const hasFlying = lowerDesc.includes('fly') || lowerDesc.includes('flying');
+
+    // Choose cinematography based on action keywords
+    if (hasOrbiting && structures.length >= 2) {
+      // For orbiting objects, use orbit shots to show the motion
+      const orbitDuration = Math.floor(duration * 0.6);
+      const establishDuration = duration - orbitDuration;
+
+      shots.push({
+        type: EnumMapper.mapShotType('establish'),
+        target: structureTargets[0],
+        duration: establishDuration,
+        startPos: [0, 40, 60],
+        endPos: [0, 30, 40],
+      });
+
+      shots.push({
+        type: EnumMapper.mapShotType('orbit'),
+        target: structureTargets[0],
+        duration: orbitDuration,
+        startPos: [50, 25, 0],
+        endPos: [-50, 25, 0],
+      });
+    } else if (hasColliding || hasExploding) {
+      // For collisions/explosions, use close-up and pull-back
+      const closeupDuration = Math.floor(duration * 0.4);
+      const pullbackDuration = duration - closeupDuration;
+
+      shots.push({
+        type: EnumMapper.mapShotType('close_up'),
+        target: structureTargets[0],
+        duration: closeupDuration,
+        startPos: [15, 15, 15],
+        endPos: [5, 10, 5],
+      });
+
+      shots.push({
+        type: EnumMapper.mapShotType('pull_back'),
+        target: structureTargets[0],
+        duration: pullbackDuration,
+        startPos: [5, 10, 5],
+        endPos: [0, 50, 80],
+      });
+    } else if (hasFlying) {
+      // For flying, use flythrough shots
+      const flythroughDuration = Math.floor(duration * 0.7);
+      const establishDuration = duration - flythroughDuration;
+
+      shots.push({
+        type: EnumMapper.mapShotType('establish'),
+        target: structureTargets[0],
+        duration: establishDuration,
+        startPos: [0, 30, 50],
+        endPos: [0, 25, 30],
+      });
+
+      shots.push({
+        type: EnumMapper.mapShotType('flythrough'),
+        target: entityTargets[0],
+        duration: flythroughDuration,
+        startPos: [0, 25, 30],
+        endPos: [40, 15, -30],
+      });
+    } else if (duration <= 20) {
       // Short sequence - single establishing shot
       shots.push({
-        type: EnumMapper.mapShotType('establish'), // Validate shot type
+        type: EnumMapper.mapShotType('establish'),
         target: structureTargets[0],
         duration: duration,
         startPos: [0, 30, 50],
@@ -795,7 +932,7 @@ class CerebrasService {
       const flythroughDuration = duration - establishDuration;
 
       shots.push({
-        type: EnumMapper.mapShotType('establish'), // Validate shot type
+        type: EnumMapper.mapShotType('establish'),
         target: structureTargets[0],
         duration: establishDuration,
         startPos: [0, 30, 50],
@@ -803,7 +940,7 @@ class CerebrasService {
       });
 
       shots.push({
-        type: EnumMapper.mapShotType('flythrough'), // Validate shot type
+        type: EnumMapper.mapShotType('flythrough'),
         target: entityTargets[0],
         duration: flythroughDuration,
         startPos: [0, 25, 20],
@@ -816,7 +953,7 @@ class CerebrasService {
       const closeupDuration = duration - establishDuration - orbitDuration;
 
       shots.push({
-        type: EnumMapper.mapShotType('establish'), // Validate shot type
+        type: EnumMapper.mapShotType('establish'),
         target: structureTargets[0],
         duration: establishDuration,
         startPos: [0, 30, 50],
@@ -824,7 +961,7 @@ class CerebrasService {
       });
 
       shots.push({
-        type: EnumMapper.mapShotType('orbit'), // Validate shot type
+        type: EnumMapper.mapShotType('orbit'),
         target: structureTargets[0],
         duration: orbitDuration,
         startPos: [40, 20, 0],
@@ -832,13 +969,19 @@ class CerebrasService {
       });
 
       shots.push({
-        type: EnumMapper.mapShotType('close_up'), // Validate shot type
+        type: EnumMapper.mapShotType('close_up'),
         target: entityTargets[0],
         duration: closeupDuration,
         startPos: [10, 15, 10],
         endPos: [5, 15, 5],
       });
     }
+
+    console.log(
+      `🎬 Generated cinematography with ${shots.length} shots (${shots
+        .map((s) => s.type)
+        .join(', ')})`
+    );
 
     return {
       durationSec: duration,

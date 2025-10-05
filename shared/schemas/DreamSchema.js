@@ -107,8 +107,12 @@ class DreamSchema {
       type: {
         type: 'string',
         required: true,
-        description: 'Type of structure',
-        enum: [
+        description: 'Descriptive type of structure matching prompt content',
+        minLength: 2,
+        maxLength: 100,
+        pattern: /^[a-zA-Z0-9_-]+$/,
+        allowLegacyEnums: true,
+        legacyEnums: [
           'floating_platform',
           'crystal_spire',
           'organic_tree',
@@ -181,8 +185,12 @@ class DreamSchema {
       type: {
         type: 'string',
         required: true,
-        description: 'Type of entity',
-        enum: [
+        description: 'Descriptive type of entity matching prompt content',
+        minLength: 2,
+        maxLength: 100,
+        pattern: /^[a-zA-Z0-9_-]+$/,
+        allowLegacyEnums: true,
+        legacyEnums: [
           'floating_orbs',
           'particle_swarm',
           'energy_beings',
@@ -517,16 +525,19 @@ class DreamSchema {
     }
 
     // Validate specific field types
-    if (fieldDef.type === 'array') {
+    // Determine the actual type to validate based on the value
+    const actualType = Array.isArray(value) ? 'array' : typeof value;
+
+    if (actualType === 'array') {
       const arrayErrors = this.validateArray(value, fieldDef, path);
       errors.push(...arrayErrors);
-    } else if (fieldDef.type === 'object') {
+    } else if (actualType === 'object') {
       const objectErrors = this.validateObject(value, fieldDef, path);
       errors.push(...objectErrors);
-    } else if (fieldDef.type === 'string') {
+    } else if (actualType === 'string') {
       const stringErrors = this.validateString(value, fieldDef, path);
       errors.push(...stringErrors);
-    } else if (fieldDef.type === 'number') {
+    } else if (actualType === 'number') {
       const numberErrors = this.validateNumber(value, fieldDef, path);
       errors.push(...numberErrors);
     }
@@ -648,7 +659,7 @@ class DreamSchema {
   static validateString(value, fieldDef, path) {
     const errors = [];
 
-    // Check enum values
+    // Check enum values (for fields with strict enums)
     if (fieldDef.enum && !fieldDef.enum.includes(value)) {
       // Find closest valid enum value as repair suggestion
       // Use smart mapping for known fields
@@ -690,15 +701,31 @@ class DreamSchema {
       errors.push(error);
     }
 
+    // For flexible type fields with backward compatibility
+    // Check if value is a legacy enum value (always valid)
+    if (fieldDef.allowLegacyEnums && fieldDef.legacyEnums) {
+      if (fieldDef.legacyEnums.includes(value)) {
+        // Legacy enum value - skip pattern and length validation
+        return errors;
+      }
+    }
+
     // Check pattern
     if (fieldDef.pattern && !fieldDef.pattern.test(value)) {
-      errors.push({
+      const error = {
         field: path,
         error: 'PATTERN_MISMATCH',
-        message: `Field '${path}' does not match required pattern`,
+        message: `Field '${path}' does not match required pattern (alphanumeric with underscores/hyphens only)`,
         expected: fieldDef.pattern.toString(),
         received: value,
-      });
+      };
+
+      // For flexible type fields, suggest sanitization
+      if (fieldDef.allowLegacyEnums) {
+        error.repairSuggestion = value.replace(/[^a-zA-Z0-9_-]/g, '_');
+      }
+
+      errors.push(error);
     }
 
     // Check length
@@ -713,13 +740,20 @@ class DreamSchema {
     }
 
     if (fieldDef.maxLength !== undefined && value.length > fieldDef.maxLength) {
-      errors.push({
+      const error = {
         field: path,
         error: 'STRING_TOO_LONG',
         message: `Field '${path}' must be at most ${fieldDef.maxLength} characters`,
         expected: `<= ${fieldDef.maxLength}`,
         received: value.length,
-      });
+      };
+
+      // For flexible type fields, suggest truncation
+      if (fieldDef.allowLegacyEnums) {
+        error.repairSuggestion = value.substring(0, fieldDef.maxLength);
+      }
+
+      errors.push(error);
     }
 
     return errors;

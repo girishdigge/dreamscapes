@@ -106,8 +106,22 @@ class UnifiedValidator {
 
     const result = DreamSchema.validateStructures(structures);
 
-    // Additional structure-specific validations
+    // Additional structure-specific validations including type format checking
     const additionalErrors = this.validateStructureReferences(structures);
+
+    // Validate type strings for each structure
+    structures.forEach((structure, index) => {
+      if (structure.type) {
+        const typeValidation = this.validateTypeString(
+          structure.type,
+          `structures[${index}].type`
+        );
+        if (!typeValidation.valid) {
+          additionalErrors.push(...typeValidation.errors);
+        }
+      }
+    });
+
     const allErrors = [...result.errors, ...additionalErrors];
 
     return this.createValidationResult(
@@ -142,8 +156,22 @@ class UnifiedValidator {
 
     const result = DreamSchema.validateEntities(entities);
 
-    // Additional entity-specific validations
+    // Additional entity-specific validations including type format checking
     const additionalErrors = this.validateEntityParameters(entities);
+
+    // Validate type strings for each entity
+    entities.forEach((entity, index) => {
+      if (entity.type) {
+        const typeValidation = this.validateTypeString(
+          entity.type,
+          `entities[${index}].type`
+        );
+        if (!typeValidation.valid) {
+          additionalErrors.push(...typeValidation.errors);
+        }
+      }
+    });
+
     const allErrors = [...result.errors, ...additionalErrors];
 
     return this.createValidationResult(
@@ -416,6 +444,102 @@ class UnifiedValidator {
     });
 
     return errors;
+  }
+
+  /**
+   * Validate type string format for flexible types
+   * Checks format requirements: length (2-100 chars) and pattern (alphanumeric with _- only)
+   * @param {string} typeValue - Type string to validate
+   * @param {string} fieldPath - Field path for error reporting
+   * @returns {Object} Validation result with errors array
+   */
+  validateTypeString(typeValue, fieldPath) {
+    const errors = [];
+
+    // Check if type is a string
+    if (typeof typeValue !== 'string') {
+      errors.push({
+        field: fieldPath,
+        error: 'INVALID_TYPE_FORMAT',
+        message: `Type must be a string`,
+        expected: 'string',
+        received: typeof typeValue,
+        severity: 'error',
+      });
+      return { valid: false, errors };
+    }
+
+    // Get legacy enum values from DreamSchema
+    const isStructureType = fieldPath.includes('structures');
+    const isEntityType = fieldPath.includes('entities');
+
+    let legacyEnums = [];
+    if (isStructureType) {
+      const structureSchema = DreamSchema.getStructureSchema();
+      legacyEnums = structureSchema.type.legacyEnums || [];
+    } else if (isEntityType) {
+      const entitySchema = DreamSchema.getEntitySchema();
+      legacyEnums = entitySchema.type.legacyEnums || [];
+    }
+
+    // If it's a legacy enum value, it's always valid (backward compatibility)
+    if (legacyEnums.includes(typeValue)) {
+      return { valid: true, errors: [], isLegacy: true };
+    }
+
+    // Validate length constraints (2-100 characters)
+    if (typeValue.length < 2) {
+      errors.push({
+        field: fieldPath,
+        error: 'TYPE_TOO_SHORT',
+        message: `Type '${typeValue}' must be at least 2 characters long`,
+        expected: 'Length >= 2',
+        received: typeValue.length,
+        severity: 'error',
+        hint: 'Type strings must be descriptive (minimum 2 characters)',
+      });
+    }
+
+    if (typeValue.length > 100) {
+      errors.push({
+        field: fieldPath,
+        error: 'TYPE_TOO_LONG',
+        message: `Type '${typeValue}' must be at most 100 characters long`,
+        expected: 'Length <= 100',
+        received: typeValue.length,
+        severity: 'error',
+        hint: 'Consider using a shorter, more concise type name',
+      });
+    }
+
+    // Validate pattern (alphanumeric with underscores and hyphens only)
+    const validPattern = /^[a-zA-Z0-9_-]+$/;
+    if (!validPattern.test(typeValue)) {
+      // Find invalid characters for better error message
+      const invalidChars = typeValue
+        .split('')
+        .filter((char) => !/[a-zA-Z0-9_-]/.test(char))
+        .filter((char, index, self) => self.indexOf(char) === index) // unique
+        .join(', ');
+
+      errors.push({
+        field: fieldPath,
+        error: 'INVALID_TYPE_FORMAT',
+        message: `Type '${typeValue}' contains invalid characters. Only alphanumeric characters, underscores (_), and hyphens (-) are allowed`,
+        expected: 'Pattern: /^[a-zA-Z0-9_-]+$/',
+        received: typeValue,
+        invalidCharacters: invalidChars,
+        severity: 'error',
+        hint: 'Replace spaces with underscores or hyphens, remove special characters',
+        repairSuggestion: typeValue.replace(/[^a-zA-Z0-9_-]/g, '_'),
+      });
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      isLegacy: false,
+    };
   }
 
   /**
