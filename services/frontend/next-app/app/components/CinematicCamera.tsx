@@ -1,15 +1,10 @@
 // services/frontend/next-app/app/components/CinematicCamera.tsx
 'use client';
 
-import { useRef, useEffect, useMemo } from 'react';
+import { useRef, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import {
-  Dream,
-  DreamCinematographyShot,
-  DreamStructure,
-  DreamEntity,
-} from '../types/dream';
+import { Dream, CameraShot } from '../types/dream';
 
 interface CinematicCameraProps {
   dream: Dream;
@@ -18,16 +13,33 @@ interface CinematicCameraProps {
   onTimeUpdate: (time: number) => void;
 }
 
-interface InitialCameraState {
-  position: THREE.Vector3;
-  target: THREE.Vector3;
-  fov: number;
+// Cinematic FOV range constants
+const CINEMATIC_FOV_MIN = 35;
+const CINEMATIC_FOV_MAX = 45;
+const CINEMATIC_FOV_DEFAULT = 40;
+
+// Shot transition configuration
+const DEFAULT_TRANSITION_DURATION = 1.0; // seconds
+
+interface ShotTransitionState {
+  fromShot: CameraShot | null;
+  toShot: CameraShot | null;
+  transitionStartTime: number;
+  transitionDuration: number;
+  isTransitioning: boolean;
 }
 
-interface InitialCameraState {
-  position: THREE.Vector3;
-  target: THREE.Vector3;
-  fov: number;
+// Rule of thirds composition offsets
+interface RuleOfThirdsOffset {
+  horizontal: number; // -1 (left), 0 (center), 1 (right)
+  vertical: number; // -1 (bottom), 0 (center), 1 (top)
+}
+
+// Target tracking state for look-ahead
+interface TargetTrackingState {
+  lastPosition: THREE.Vector3;
+  velocity: THREE.Vector3;
+  predictedPosition: THREE.Vector3;
 }
 
 export default function CinematicCamera({
@@ -36,487 +48,886 @@ export default function CinematicCamera({
   currentTime,
   onTimeUpdate,
 }: CinematicCameraProps) {
-  const { camera } = useThree();
-  const startTimeRef = useRef<number | null>(null);
-  const initialPositionRef = useRef<InitialCameraState | null>(null);
-  const lookAtTargetRef = useRef(new THREE.Vector3());
-  const currentShotRef = useRef<{
-    type: string;
-    progress: number;
-    position: number[];
-    lookAt: number[];
-  } | null>(null);
+  const { camera, scene } = useThree();
+  const lastTimeRef = useRef<number>(0);
+  const transitionStateRef = useRef<ShotTransitionState>({
+    fromShot: null,
+    toShot: null,
+    transitionStartTime: 0,
+    transitionDuration: DEFAULT_TRANSITION_DURATION,
+    isTransitioning: false,
+  });
+  const previousShotIndexRef = useRef<number>(-1);
+  const targetTrackingRef = useRef<Map<string, TargetTrackingState>>(new Map());
 
-  const cinematography = dream.cinematography || {
-    durationSec: 30,
-    shots: [
-      {
-        type: 'establish',
-        target: 's1',
-        duration: 30,
-        startPos: [0, 30, 50],
-        endPos: [0, 15, -20],
-      },
-    ],
-  };
+  // Get camera shots from new schema or fallback to legacy
+  const cameraShots = dream.camera || [];
 
-  // Pre-calculate shot timeline for smooth transitions
-  const shotTimeline = useMemo(() => {
-    let accumulatedTime = 0;
-    return cinematography.shots.map((shot, index) => {
-      const startTime = accumulatedTime;
-      const endTime = accumulatedTime + shot.duration;
-      accumulatedTime += shot.duration;
-
-      return {
-        ...shot,
-        startTime,
-        endTime,
-        index,
-      };
-    });
-  }, [cinematography.shots]);
-
-  // Store initial camera state
+  // Initialize camera position
   useEffect(() => {
-    if (!initialPositionRef.current) {
-      initialPositionRef.current = {
-        position: camera.position.clone(),
-        target: new THREE.Vector3(0, 0, 0),
-        fov: (camera as THREE.PerspectiveCamera).fov || 60,
-      };
-    }
-  }, [camera]);
+    if (cameraShots.length > 0) {
+      const firstShot = cameraShots[0];
+      camera.position.set(...firstShot.position);
 
-  // Handle playback state changes
-  useEffect(() => {
-    if (isPlaying && !startTimeRef.current) {
-      startTimeRef.current = Date.now() - currentTime * 1000;
-    } else if (!isPlaying) {
-      startTimeRef.current = null;
-    }
-  }, [isPlaying, currentTime]);
+      if (firstShot.lookAt) {
+        camera.lookAt(new THREE.Vector3(...firstShot.lookAt));
+      } else if (firstShot.target) {
+        // Look at target structure
+        const targetObj = scene.getObjectByName(firstShot.target);
+        if (targetObj) {
+          camera.lookAt(targetObj.position);
+        }
+      }
 
-  // Reset camera to initial position when not playing
-  useEffect(() => {
-    if (!isPlaying && initialPositionRef.current) {
-      camera.position.lerp(initialPositionRef.current.position, 0.1);
-      camera.lookAt(initialPositionRef.current.target);
+      // Apply cinematic FOV (clamp to 35-45 range)
       if (camera instanceof THREE.PerspectiveCamera) {
-        camera.fov = initialPositionRef.current.fov;
+        const fov = firstShot.fov || CINEMATIC_FOV_DEFAULT;
+        camera.fov = THREE.MathUtils.clamp(
+          fov,
+          CINEMATIC_FOV_MIN,
+          CINEMATIC_FOV_MAX
+        );
+        camera.updateProjectionMatrix();
+      }
+    } else {
+      // No shots defined, ensure default cinematic FOV
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.fov = CINEMATIC_FOV_DEFAULT;
         camera.updateProjectionMatrix();
       }
     }
-  }, [isPlaying, camera]);
+  }, [camera, scene, cameraShots]);
 
-  useFrame((state, delta) => {
-    if (!isPlaying || !shotTimeline.length) return;
+  // Animation loop with shot transition blending
+  useFrame((_state, delta) => {
+    if (!isPlaying || cameraShots.length === 0) return;
 
-    // Update current time
-    const now = Date.now();
-    if (startTimeRef.current) {
-      const elapsed = (now - startTimeRef.current) / 1000;
-      const totalDuration = cinematography.durationSec;
+    // Update time
+    const newTime = currentTime + delta;
+    onTimeUpdate(newTime);
+    lastTimeRef.current = newTime;
 
-      if (elapsed >= totalDuration) {
-        onTimeUpdate(totalDuration);
-        return;
+    // Find current camera shot
+    let currentShotIndex = -1;
+    let currentShot: CameraShot | null = null;
+    let shotProgress = 0;
+
+    for (let i = 0; i < cameraShots.length; i++) {
+      const shot = cameraShots[i];
+      const shotEnd = shot.startTime + shot.duration;
+
+      if (newTime >= shot.startTime && newTime < shotEnd) {
+        currentShotIndex = i;
+        currentShot = shot;
+        shotProgress = (newTime - shot.startTime) / shot.duration;
+        break;
       }
-
-      onTimeUpdate(elapsed);
     }
 
-    // Find current shot and next shot for smooth transitions
-    const currentShot = shotTimeline.find(
-      (shot) => currentTime >= shot.startTime && currentTime < shot.endTime
-    );
+    if (!currentShot) {
+      // Use last shot if we're past the end
+      currentShotIndex = cameraShots.length - 1;
+      currentShot = cameraShots[currentShotIndex];
+      shotProgress = 1;
+    }
 
-    if (!currentShot) return;
-
-    const shotProgress =
-      (currentTime - currentShot.startTime) / currentShot.duration;
-
-    // Get next shot for smooth transitions
-    const nextShotIndex = currentShot.index + 1;
-    const nextShot =
-      nextShotIndex < shotTimeline.length ? shotTimeline[nextShotIndex] : null;
-
-    // Calculate camera transform
-    const { position, lookAt, fov } = calculateAdvancedCameraTransform(
-      currentShot,
-      shotProgress,
-      nextShot,
-      dream.structures || [],
-      dream.entities || [],
-      dream.style
-    );
-
-    // Apply smooth camera movement with easing
-    const lerpFactor = Math.min(delta * 2, 0.1); // Smooth but responsive
-    camera.position.lerp(position, lerpFactor);
-
-    // Smooth lookAt transition
-    lookAtTargetRef.current.lerp(lookAt, lerpFactor);
-    camera.lookAt(lookAtTargetRef.current);
-
-    // FOV animation for dramatic effect
+    // Detect shot change and initiate transition
     if (
-      fov &&
-      camera instanceof THREE.PerspectiveCamera &&
-      Math.abs(camera.fov - fov) > 0.1
+      currentShotIndex !== previousShotIndexRef.current &&
+      previousShotIndexRef.current !== -1
     ) {
-      camera.fov = THREE.MathUtils.lerp(camera.fov, fov, lerpFactor);
+      const previousShot = cameraShots[previousShotIndexRef.current];
+      const transitionDuration =
+        parseFloat(currentShot.transition) || DEFAULT_TRANSITION_DURATION;
+
+      transitionStateRef.current = {
+        fromShot: previousShot,
+        toShot: currentShot,
+        transitionStartTime: newTime,
+        transitionDuration: transitionDuration,
+        isTransitioning: true,
+      };
+    }
+    previousShotIndexRef.current = currentShotIndex;
+
+    // Handle shot transition blending
+    const transitionState = transitionStateRef.current;
+    if (
+      transitionState.isTransitioning &&
+      transitionState.fromShot &&
+      transitionState.toShot
+    ) {
+      const transitionElapsed = newTime - transitionState.transitionStartTime;
+      const transitionProgress = Math.min(
+        transitionElapsed / transitionState.transitionDuration,
+        1
+      );
+
+      if (transitionProgress >= 1) {
+        // Transition complete
+        transitionState.isTransitioning = false;
+      } else {
+        // Blend between shots
+        const blendFactor = applyEasing(
+          transitionProgress,
+          'ease-in-out-cubic'
+        );
+        blendCameraShots(
+          camera,
+          scene,
+          transitionState.fromShot,
+          transitionState.toShot,
+          blendFactor
+        );
+
+        // Blend FOV
+        if (camera instanceof THREE.PerspectiveCamera) {
+          const fromFov = transitionState.fromShot.fov || CINEMATIC_FOV_DEFAULT;
+          const toFov = transitionState.toShot.fov || CINEMATIC_FOV_DEFAULT;
+          const clampedFromFov = THREE.MathUtils.clamp(
+            fromFov,
+            CINEMATIC_FOV_MIN,
+            CINEMATIC_FOV_MAX
+          );
+          const clampedToFov = THREE.MathUtils.clamp(
+            toFov,
+            CINEMATIC_FOV_MIN,
+            CINEMATIC_FOV_MAX
+          );
+          camera.fov = THREE.MathUtils.lerp(
+            clampedFromFov,
+            clampedToFov,
+            blendFactor
+          );
+          camera.updateProjectionMatrix();
+        }
+        return; // Skip normal shot update during transition
+      }
+    }
+
+    // Apply easing to shot progress
+    const easedProgress = applyEasing(
+      shotProgress,
+      currentShot.easing || 'ease-in-out'
+    );
+
+    // Update camera position based on movement type with tracking
+    updateCameraPosition(
+      camera,
+      scene,
+      currentShot,
+      easedProgress,
+      targetTrackingRef.current,
+      delta
+    );
+
+    // Update FOV with cinematic range clamping
+    if (camera instanceof THREE.PerspectiveCamera) {
+      const targetFov = currentShot.fov || CINEMATIC_FOV_DEFAULT;
+      const clampedFov = THREE.MathUtils.clamp(
+        targetFov,
+        CINEMATIC_FOV_MIN,
+        CINEMATIC_FOV_MAX
+      );
+      camera.fov = THREE.MathUtils.lerp(camera.fov, clampedFov, 0.1);
       camera.updateProjectionMatrix();
     }
-
-    // Store current shot reference for debugging
-    currentShotRef.current = {
-      ...currentShot,
-      progress: shotProgress,
-      position: position.toArray(),
-      lookAt: lookAt.toArray(),
-    };
   });
 
-  return null; // This component doesn't render anything visible
+  return null;
 }
 
-function calculateAdvancedCameraTransform(
-  shot: DreamCinematographyShot,
-  progress: number,
-  nextShot: DreamCinematographyShot | null,
-  structures: DreamStructure[],
-  entities: DreamEntity[],
-  style: string
-) {
-  const { type, target, startPos, endPos } = shot;
-
-  // Enhanced easing functions for smoother motion
-  const easeInOutCubic = (t: number): number =>
-    t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-  const easeInOutQuart = (t: number): number =>
-    t < 0.5 ? 8 * t * t * t * t : 1 - Math.pow(-2 * t + 2, 4) / 2;
-  const easeInOutSine = (t: number): number => -(Math.cos(Math.PI * t) - 1) / 2;
-
-  // Apply easing based on shot type
-  let easedProgress;
-  switch (type) {
-    case 'establish':
-      easedProgress = easeInOutSine(progress);
-      break;
-    case 'flythrough':
-      easedProgress = easeInOutQuart(progress);
-      break;
-    case 'orbit':
-      easedProgress = progress; // Linear for orbits
-      break;
-    default:
-      easedProgress = easeInOutCubic(progress);
+// Calculate rule-of-thirds offset for composition
+function calculateRuleOfThirdsOffset(
+  camera: THREE.Camera,
+  targetPosition: THREE.Vector3,
+  offset?: RuleOfThirdsOffset
+): THREE.Vector3 {
+  if (!offset || (offset.horizontal === 0 && offset.vertical === 0)) {
+    return targetPosition;
   }
 
-  // Default positions with style-based variations
-  const getStyleDefaults = (
-    style: string
-  ): {
-    defaultStart: [number, number, number];
-    defaultEnd: [number, number, number];
-    fov: number;
-  } => {
-    switch (style) {
-      case 'cyberpunk':
-        return {
-          defaultStart: [0, 20, 40],
-          defaultEnd: [0, 25, -30],
-          fov: 75,
-        };
-      case 'nightmare':
-        return {
-          defaultStart: [0, 10, 60],
-          defaultEnd: [0, 5, -40],
-          fov: 85,
-        };
-      case 'surreal':
-        return {
-          defaultStart: [30, 40, 30],
-          defaultEnd: [-30, 20, -30],
-          fov: 65,
-        };
-      case 'fantasy':
-        return {
-          defaultStart: [0, 35, 45],
-          defaultEnd: [0, 20, -25],
-          fov: 70,
-        };
-      default: // ethereal
-        return {
-          defaultStart: [0, 30, 50],
-          defaultEnd: [0, 15, -20],
-          fov: 60,
-        };
-    }
-  };
+  // Get camera's right and up vectors
+  const cameraDirection = new THREE.Vector3();
+  camera.getWorldDirection(cameraDirection);
 
-  const styleDefaults = getStyleDefaults(style);
-  const defaultStart = startPos || styleDefaults.defaultStart;
-  const defaultEnd = endPos || styleDefaults.defaultEnd;
-  const baseFov = styleDefaults.fov;
+  const cameraRight = new THREE.Vector3();
+  cameraRight
+    .crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0))
+    .normalize();
 
-  // Find target object with enhanced search
-  let targetObject = null;
-  let targetPos = new THREE.Vector3(0, 20, 0); // Default target
+  const cameraUp = new THREE.Vector3();
+  cameraUp.crossVectors(cameraRight, cameraDirection).normalize();
 
-  if (target) {
-    targetObject =
-      structures.find((s) => s.id === target) ||
-      entities.find((e) => e.id === target);
+  // Calculate distance to target for proportional offset
+  const distance = camera.position.distanceTo(targetPosition);
+  const offsetScale = distance * 0.15; // 15% of distance for rule-of-thirds
 
-    if (targetObject && targetObject.pos) {
-      targetPos = new THREE.Vector3(...targetObject.pos);
-    }
+  // Apply offsets
+  const offsetPosition = targetPosition.clone();
+  offsetPosition.add(
+    cameraRight.multiplyScalar(offset.horizontal * offsetScale)
+  );
+  offsetPosition.add(cameraUp.multiplyScalar(offset.vertical * offsetScale));
+
+  return offsetPosition;
+}
+
+// Track target with velocity prediction for look-ahead
+function trackTargetWithLookAhead(
+  targetId: string,
+  currentPosition: THREE.Vector3,
+  trackingState: Map<string, TargetTrackingState>,
+  delta: number,
+  lookAheadFactor: number = 0.3
+): THREE.Vector3 {
+  let state = trackingState.get(targetId);
+
+  if (!state) {
+    // Initialize tracking state
+    state = {
+      lastPosition: currentPosition.clone(),
+      velocity: new THREE.Vector3(0, 0, 0),
+      predictedPosition: currentPosition.clone(),
+    };
+    trackingState.set(targetId, state);
+    return currentPosition;
   }
 
-  switch (type) {
-    case 'establish': {
-      // Wide establishing shot with smooth curve
-      const start = new THREE.Vector3(...defaultStart);
-      const end = new THREE.Vector3(...defaultEnd);
+  // Calculate velocity
+  const displacement = new THREE.Vector3().subVectors(
+    currentPosition,
+    state.lastPosition
+  );
+  const velocity = displacement.divideScalar(delta);
 
-      // Add subtle curve for more cinematic movement
-      const midPoint = start.clone().lerp(end, 0.5);
-      midPoint.y += 10 * Math.sin(Math.PI * easedProgress);
+  // Smooth velocity with exponential moving average
+  state.velocity.lerp(velocity, 0.3);
 
-      const position = start
-        .clone()
-        .lerp(midPoint, easedProgress * 2)
-        .lerp(end, Math.max(0, easedProgress * 2 - 1));
+  // Predict future position based on velocity
+  const lookAheadTime = lookAheadFactor; // seconds
+  state.predictedPosition = currentPosition
+    .clone()
+    .add(state.velocity.clone().multiplyScalar(lookAheadTime));
 
-      return {
-        position,
-        lookAt: targetPos,
-        fov: baseFov + Math.sin(easedProgress * Math.PI) * 5, // Slight FOV breathing
-      };
-    }
+  // Update last position
+  state.lastPosition.copy(currentPosition);
 
-    case 'orbit': {
-      // Smooth orbital motion with height variation
-      const radius = 35 + Math.sin(progress * Math.PI * 2) * 5;
-      const baseHeight = 25;
-      const heightVariation = Math.sin(progress * Math.PI * 4) * 8;
-      const angle = progress * Math.PI * 2;
+  return state.predictedPosition;
+}
 
-      // Add some randomness for more organic movement
-      const noise = Math.sin(progress * Math.PI * 8) * 2;
+// Get target position with tracking and composition
+function getTargetPositionWithComposition(
+  scene: THREE.Scene,
+  shot: CameraShot,
+  trackingState: Map<string, TargetTrackingState>,
+  camera: THREE.Camera,
+  delta: number
+): THREE.Vector3 {
+  let targetPosition: THREE.Vector3;
 
-      const position = new THREE.Vector3(
-        targetPos.x + Math.cos(angle) * (radius + noise),
-        targetPos.y + baseHeight + heightVariation,
-        targetPos.z + Math.sin(angle) * (radius - noise)
+  if (shot.target) {
+    // Track dynamic target
+    const targetObj = scene.getObjectByName(shot.target);
+    if (targetObj) {
+      const currentPos = targetObj.position.clone();
+      // Apply look-ahead for moving targets
+      targetPosition = trackTargetWithLookAhead(
+        shot.target,
+        currentPos,
+        trackingState,
+        delta,
+        0.3
       );
-
-      return {
-        position,
-        lookAt: targetPos.clone().add(new THREE.Vector3(0, 5, 0)), // Look slightly above target
-        fov: baseFov - 5, // Tighter FOV for orbits
-      };
+    } else {
+      targetPosition = new THREE.Vector3(0, 0, 0);
     }
+  } else if (shot.lookAt) {
+    // Static look-at position
+    targetPosition = new THREE.Vector3(...shot.lookAt);
+  } else {
+    targetPosition = new THREE.Vector3(0, 0, 0);
+  }
 
-    case 'flythrough': {
-      // Dynamic flythrough with complex curved path
-      const start = new THREE.Vector3(...defaultStart);
-      const end = new THREE.Vector3(...defaultEnd);
+  // Apply rule-of-thirds composition if specified
+  // This would be extended in the future to support custom offsets per shot
+  // For now, we apply a default offset for tracking shots
+  if (shot.movement === 'tracking' && shot.target) {
+    const ruleOfThirdsOffset: RuleOfThirdsOffset = {
+      horizontal: 0.33, // Place target slightly off-center
+      vertical: 0.2, // Slightly above center
+    };
+    targetPosition = calculateRuleOfThirdsOffset(
+      camera,
+      targetPosition,
+      ruleOfThirdsOffset
+    );
+  }
 
-      // Create multiple control points for smooth spline
-      const controlPoints = [];
-      controlPoints.push(start);
+  return targetPosition;
+}
 
-      // Add intermediate control points for more dynamic movement
-      for (let i = 1; i < 4; i++) {
-        const t = i / 4;
-        const midPoint = start.clone().lerp(end, t);
+// Blend between two camera shots for smooth transitions
+function blendCameraShots(
+  camera: THREE.Camera,
+  scene: THREE.Scene,
+  fromShot: CameraShot,
+  toShot: CameraShot,
+  blendFactor: number
+) {
+  // Blend positions
+  const fromPos = new THREE.Vector3(...fromShot.position);
+  const toPos = new THREE.Vector3(...toShot.position);
+  camera.position.lerpVectors(fromPos, toPos, blendFactor);
 
-        // Add vertical arc and lateral movement
-        midPoint.y += 25 * Math.sin(t * Math.PI);
-        midPoint.x += Math.sin(t * Math.PI * 2) * 15;
-        midPoint.z += Math.cos(t * Math.PI * 2) * 10;
+  // Blend look-at targets
+  let fromLookAt: THREE.Vector3;
+  let toLookAt: THREE.Vector3;
 
-        controlPoints.push(midPoint);
+  // Determine fromShot look-at target
+  if (fromShot.lookAt) {
+    fromLookAt = new THREE.Vector3(...fromShot.lookAt);
+  } else if (fromShot.target) {
+    const targetObj = scene.getObjectByName(fromShot.target);
+    fromLookAt = targetObj
+      ? targetObj.position.clone()
+      : new THREE.Vector3(0, 0, 0);
+  } else {
+    fromLookAt = new THREE.Vector3(0, 0, 0);
+  }
+
+  // Determine toShot look-at target
+  if (toShot.lookAt) {
+    toLookAt = new THREE.Vector3(...toShot.lookAt);
+  } else if (toShot.target) {
+    const targetObj = scene.getObjectByName(toShot.target);
+    toLookAt = targetObj
+      ? targetObj.position.clone()
+      : new THREE.Vector3(0, 0, 0);
+  } else {
+    toLookAt = new THREE.Vector3(0, 0, 0);
+  }
+
+  // Blend and apply look-at
+  const blendedLookAt = new THREE.Vector3().lerpVectors(
+    fromLookAt,
+    toLookAt,
+    blendFactor
+  );
+  camera.lookAt(blendedLookAt);
+}
+
+// Update camera position based on shot type with smooth easing
+function updateCameraPosition(
+  camera: THREE.Camera,
+  scene: THREE.Scene,
+  shot: CameraShot,
+  progress: number,
+  trackingState?: Map<string, TargetTrackingState>,
+  delta: number = 0.016
+) {
+  const targetPos = new THREE.Vector3(...shot.position);
+
+  switch (shot.movement) {
+    case 'static':
+      // Fixed camera position with subtle drift
+      camera.position.lerp(targetPos, 0.1);
+      if (shot.lookAt) {
+        const lookTarget = new THREE.Vector3(...shot.lookAt);
+        const currentTarget = new THREE.Vector3();
+        camera.getWorldDirection(currentTarget);
+        currentTarget.add(camera.position);
+        currentTarget.lerp(lookTarget, 0.05);
+        camera.lookAt(currentTarget);
+      }
+      break;
+
+    case 'tracking':
+      // Follow a target with smooth damping and rule-of-thirds composition
+      camera.position.lerp(targetPos, 0.08);
+
+      if (trackingState) {
+        // Use advanced tracking with look-ahead and composition
+        const composedTarget = getTargetPositionWithComposition(
+          scene,
+          shot,
+          trackingState,
+          camera,
+          delta
+        );
+
+        const currentTarget = new THREE.Vector3();
+        camera.getWorldDirection(currentTarget);
+        currentTarget.add(camera.position);
+        currentTarget.lerp(composedTarget, 0.1);
+        camera.lookAt(currentTarget);
+      } else {
+        // Fallback to simple tracking
+        if (shot.target) {
+          const targetObj = scene.getObjectByName(shot.target);
+          if (targetObj) {
+            const currentTarget = new THREE.Vector3();
+            camera.getWorldDirection(currentTarget);
+            currentTarget.add(camera.position);
+            currentTarget.lerp(targetObj.position, 0.1);
+            camera.lookAt(currentTarget);
+          }
+        } else if (shot.lookAt) {
+          const lookTarget = new THREE.Vector3(...shot.lookAt);
+          const currentTarget = new THREE.Vector3();
+          camera.getWorldDirection(currentTarget);
+          currentTarget.add(camera.position);
+          currentTarget.lerp(lookTarget, 0.08);
+          camera.lookAt(currentTarget);
+        }
+      }
+      break;
+
+    case 'dolly_in':
+      // Move closer to target with eased progress and optional dolly zoom
+      const startPos = new THREE.Vector3(...shot.position);
+      const targetObj = shot.target ? scene.getObjectByName(shot.target) : null;
+      const targetPoint = shot.lookAt
+        ? new THREE.Vector3(...shot.lookAt)
+        : targetObj?.position || new THREE.Vector3(0, 0, 0);
+
+      const direction = new THREE.Vector3()
+        .subVectors(targetPoint, startPos)
+        .normalize();
+      const distance = startPos.distanceTo(targetPoint);
+      const currentDistance = distance * (1 - progress * 0.5);
+
+      camera.position
+        .copy(startPos)
+        .add(direction.multiplyScalar(distance - currentDistance));
+
+      // Optional dolly zoom effect (Hitchcock zoom)
+      // As camera moves in, slightly widen FOV to create unsettling effect
+      if (camera instanceof THREE.PerspectiveCamera && progress > 0.2) {
+        const initialFov = shot.fov || CINEMATIC_FOV_DEFAULT;
+        const dollyZoomFactor = (progress - 0.2) * 3; // Subtle zoom effect
+        const dollyFov = THREE.MathUtils.clamp(
+          initialFov + dollyZoomFactor,
+          CINEMATIC_FOV_MIN,
+          CINEMATIC_FOV_MAX
+        );
+        camera.fov = THREE.MathUtils.lerp(camera.fov, dollyFov, 0.03);
+        camera.updateProjectionMatrix();
       }
 
-      controlPoints.push(end);
+      // Smooth look-at
+      const currentLookAt = new THREE.Vector3();
+      camera.getWorldDirection(currentLookAt);
+      currentLookAt.add(camera.position);
+      currentLookAt.lerp(targetPoint, 0.1);
+      camera.lookAt(currentLookAt);
+      break;
 
-      // Catmull-Rom spline interpolation
-      const position = catmullRomSpline(controlPoints, easedProgress);
+    case 'pull_back':
+      // Move away from target with eased progress
+      const pullStartPos = new THREE.Vector3(...shot.position);
+      const pullEndPos = pullStartPos.clone().multiplyScalar(1.5);
+      camera.position.lerpVectors(pullStartPos, pullEndPos, progress);
 
-      // Dynamic lookAt that leads the movement
-      const futureT = Math.min(1, easedProgress + 0.1);
-      const futurePos = catmullRomSpline(controlPoints, futureT);
-      const direction = futurePos.clone().sub(position).normalize();
-      const lookAt = position.clone().add(direction.multiplyScalar(20));
+      if (shot.lookAt) {
+        const lookTarget = new THREE.Vector3(...shot.lookAt);
+        const currentTarget = new THREE.Vector3();
+        camera.getWorldDirection(currentTarget);
+        currentTarget.add(camera.position);
+        currentTarget.lerp(lookTarget, 0.08);
+        camera.lookAt(currentTarget);
+      }
+      break;
 
-      return {
-        position,
-        lookAt,
-        fov: baseFov + Math.sin(easedProgress * Math.PI) * 15, // Dramatic FOV changes
-      };
-    }
+    case 'orbit':
+      // Orbit around target with smooth circular motion
+      const center = shot.lookAt
+        ? new THREE.Vector3(...shot.lookAt)
+        : new THREE.Vector3(0, 0, 0);
+      const radius = new THREE.Vector3(...shot.position).distanceTo(center);
+      const angle = progress * Math.PI * 2;
 
-    case 'close_up': {
-      // Intimate close-up with slight movement
-      const distance = 12 + Math.sin(easedProgress * Math.PI) * 3;
-      const angle = easedProgress * Math.PI * 0.5;
-      const height = 8 + Math.sin(easedProgress * Math.PI * 2) * 4;
-
-      const position = new THREE.Vector3(
-        targetPos.x + Math.cos(angle) * distance,
-        targetPos.y + height,
-        targetPos.z + Math.sin(angle) * distance
+      const newPos = new THREE.Vector3(
+        center.x + Math.cos(angle) * radius,
+        shot.position[1],
+        center.z + Math.sin(angle) * radius
       );
 
-      return {
-        position,
-        lookAt: targetPos,
-        fov: baseFov - 15, // Much tighter FOV for close-ups
-      };
-    }
+      camera.position.lerp(newPos, 0.1);
 
-    case 'pull_back': {
-      // Dramatic pull-back reveal
-      const startDistance = 8;
-      const endDistance = 80;
-      const distance =
-        startDistance + (endDistance - startDistance) * easedProgress;
+      // Smooth look-at center
+      const currentOrbitTarget = new THREE.Vector3();
+      camera.getWorldDirection(currentOrbitTarget);
+      currentOrbitTarget.add(camera.position);
+      currentOrbitTarget.lerp(center, 0.1);
+      camera.lookAt(currentOrbitTarget);
+      break;
 
-      // Add dramatic height increase
-      const height = 5 + easedProgress * 30;
+    case 'establish':
+      // Slow establishing shot with very gradual movement
+      camera.position.lerp(targetPos, progress * 0.3);
+      if (shot.lookAt) {
+        const lookTarget = new THREE.Vector3(...shot.lookAt);
+        const currentTarget = new THREE.Vector3();
+        camera.getWorldDirection(currentTarget);
+        currentTarget.add(camera.position);
+        currentTarget.lerp(lookTarget, 0.05);
+        camera.lookAt(currentTarget);
+      }
+      break;
 
-      const position = new THREE.Vector3(
-        targetPos.x + Math.sin(easedProgress * Math.PI * 0.5) * distance * 0.3,
-        targetPos.y + height,
-        targetPos.z + distance
+    case 'flythrough':
+      // Dynamic flythrough with smooth interpolation
+      camera.position.lerp(targetPos, progress);
+      if (shot.lookAt) {
+        const lookTarget = new THREE.Vector3(...shot.lookAt);
+        const currentTarget = new THREE.Vector3();
+        camera.getWorldDirection(currentTarget);
+        currentTarget.add(camera.position);
+        currentTarget.lerp(lookTarget, 0.15);
+        camera.lookAt(currentTarget);
+      }
+      break;
+
+    case 'cinematic_pan':
+      // Smooth panning shot
+      camera.position.lerp(targetPos, progress * 0.5);
+      if (shot.lookAt) {
+        const panTarget = new THREE.Vector3(...shot.lookAt);
+        const currentTarget = new THREE.Vector3();
+        camera.getWorldDirection(currentTarget);
+        currentTarget.add(camera.position);
+        currentTarget.lerp(panTarget, 0.08);
+        camera.lookAt(currentTarget);
+      }
+      break;
+
+    case 'crane':
+      // Crane movement (vertical + horizontal combined)
+      const craneStartPos = new THREE.Vector3(...shot.position);
+      const craneCenter = shot.lookAt
+        ? new THREE.Vector3(...shot.lookAt)
+        : new THREE.Vector3(0, 0, 0);
+
+      // Calculate crane arc (rising or descending while moving)
+      const craneRadius = craneStartPos.distanceTo(craneCenter);
+      const craneAngle = progress * Math.PI * 0.5; // 90 degree arc
+
+      // Vertical movement (crane up/down)
+      const verticalOffset = Math.sin(craneAngle) * craneRadius * 0.5;
+
+      // Horizontal circular movement
+      const horizontalAngle = progress * Math.PI * 0.3; // 54 degree horizontal sweep
+
+      const cranePos = new THREE.Vector3(
+        craneCenter.x + Math.cos(horizontalAngle) * craneRadius,
+        craneStartPos.y + verticalOffset,
+        craneCenter.z + Math.sin(horizontalAngle) * craneRadius
       );
 
-      return {
-        position,
-        lookAt: targetPos,
-        fov: baseFov - 10 + easedProgress * 25, // FOV opens up during pull-back
-      };
-    }
+      camera.position.lerp(cranePos, 0.1);
 
-    case 'dolly_zoom': {
-      // Hitchcock-style dolly zoom effect
-      const startDistance = 30;
-      const endDistance = 15;
-      const distance =
-        startDistance + (endDistance - startDistance) * easedProgress;
+      // Look at center with smooth interpolation
+      const craneTarget = new THREE.Vector3();
+      camera.getWorldDirection(craneTarget);
+      craneTarget.add(camera.position);
+      craneTarget.lerp(craneCenter, 0.1);
+      camera.lookAt(craneTarget);
+      break;
 
-      const position = new THREE.Vector3(
-        targetPos.x,
-        targetPos.y + 10,
-        targetPos.z + distance
-      );
+    case 'handheld':
+      // Handheld camera shake effect for realism
+      const handheldBase = new THREE.Vector3(...shot.position);
+      const shakeIntensity = 0.05; // Subtle shake
+      const shakeFrequency = 8; // Hz
 
-      // Counter-zoom: as we dolly in, we zoom out to maintain subject size
-      const startFov = baseFov - 10;
-      const endFov = baseFov + 20;
-      const fov = startFov + (endFov - startFov) * easedProgress;
+      // Generate procedural shake using multiple sine waves
+      const time = progress * shot.duration;
+      const shakeX = Math.sin(time * shakeFrequency) * shakeIntensity;
+      const shakeY =
+        Math.sin(time * shakeFrequency * 1.3) * shakeIntensity * 0.7;
+      const shakeZ =
+        Math.sin(time * shakeFrequency * 0.8) * shakeIntensity * 0.5;
 
-      return {
-        position,
-        lookAt: targetPos,
-        fov,
-      };
-    }
+      const handheldPos = handheldBase
+        .clone()
+        .add(new THREE.Vector3(shakeX, shakeY, shakeZ));
 
-    case 'spiral': {
-      // Spiraling ascent or descent
-      const radius = 40 - easedProgress * 20;
-      const angle = easedProgress * Math.PI * 4; // Two full rotations
-      const startHeight = 10;
-      const endHeight = 60;
-      const height = startHeight + (endHeight - startHeight) * easedProgress;
+      camera.position.lerp(handheldPos, 0.3);
 
-      const position = new THREE.Vector3(
-        targetPos.x + Math.cos(angle) * radius,
-        targetPos.y + height,
-        targetPos.z + Math.sin(angle) * radius
-      );
+      // Add subtle rotation shake
+      if (shot.lookAt) {
+        const handheldTarget = new THREE.Vector3(...shot.lookAt);
+        const rotShakeX = Math.sin(time * shakeFrequency * 1.1) * 0.002;
+        const rotShakeY = Math.sin(time * shakeFrequency * 0.9) * 0.002;
+        handheldTarget.add(new THREE.Vector3(rotShakeX, rotShakeY, 0));
 
-      return {
-        position,
-        lookAt: targetPos,
-        fov: baseFov + Math.sin(angle) * 8,
-      };
-    }
+        const currentTarget = new THREE.Vector3();
+        camera.getWorldDirection(currentTarget);
+        currentTarget.add(camera.position);
+        currentTarget.lerp(handheldTarget, 0.2);
+        camera.lookAt(currentTarget);
+      }
+      break;
 
-    case 'tracking': {
-      // Side-tracking shot that follows along a path
-      const start = new THREE.Vector3(...defaultStart);
-      const end = new THREE.Vector3(...defaultEnd);
-      const position = start.clone().lerp(end, easedProgress);
+    case 'close_up':
+      // Close-up shot with dolly zoom effect (vertigo effect)
+      const closeUpStart = new THREE.Vector3(...shot.position);
+      const closeUpTarget = shot.lookAt
+        ? new THREE.Vector3(...shot.lookAt)
+        : shot.target
+        ? scene.getObjectByName(shot.target)?.position ||
+          new THREE.Vector3(0, 0, 0)
+        : new THREE.Vector3(0, 0, 0);
 
-      // Maintain consistent distance from target
-      const directionToTarget = targetPos.clone().sub(position).normalize();
-      position.add(directionToTarget.multiplyScalar(-25));
+      // Move camera closer
+      const closeUpDirection = new THREE.Vector3()
+        .subVectors(closeUpTarget, closeUpStart)
+        .normalize();
+      const closeUpDistance = closeUpStart.distanceTo(closeUpTarget);
+      const closeUpProgress = progress * 0.6; // Move 60% closer
 
-      return {
-        position,
-        lookAt: targetPos,
-        fov: baseFov,
-      };
-    }
+      const closeUpPos = closeUpStart
+        .clone()
+        .add(
+          closeUpDirection.multiplyScalar(closeUpDistance * closeUpProgress)
+        );
 
-    default: {
-      // Fallback with enhanced interpolation
-      const start = new THREE.Vector3(...defaultStart);
-      const end = new THREE.Vector3(...defaultEnd);
-      const position = start.clone().lerp(end, easedProgress);
+      camera.position.lerp(closeUpPos, 0.08);
 
-      return {
-        position,
-        lookAt: targetPos,
-        fov: baseFov,
-      };
-    }
+      // Dolly zoom: adjust FOV to maintain subject size
+      if (camera instanceof THREE.PerspectiveCamera) {
+        const initialFov = shot.fov || CINEMATIC_FOV_DEFAULT;
+        // As we move closer, widen FOV slightly to maintain framing
+        const fovAdjustment = closeUpProgress * 5; // Up to 5 degrees wider
+        const adjustedFov = THREE.MathUtils.clamp(
+          initialFov + fovAdjustment,
+          CINEMATIC_FOV_MIN,
+          CINEMATIC_FOV_MAX
+        );
+        camera.fov = THREE.MathUtils.lerp(camera.fov, adjustedFov, 0.05);
+        camera.updateProjectionMatrix();
+      }
+
+      // Smooth look-at
+      const closeUpLookAt = new THREE.Vector3();
+      camera.getWorldDirection(closeUpLookAt);
+      closeUpLookAt.add(camera.position);
+      closeUpLookAt.lerp(closeUpTarget, 0.1);
+      camera.lookAt(closeUpLookAt);
+      break;
+
+    default:
+      // Default smooth movement with damping
+      camera.position.lerp(targetPos, 0.05);
+      if (shot.lookAt) {
+        const lookTarget = new THREE.Vector3(...shot.lookAt);
+        const currentTarget = new THREE.Vector3();
+        camera.getWorldDirection(currentTarget);
+        currentTarget.add(camera.position);
+        currentTarget.lerp(lookTarget, 0.05);
+        camera.lookAt(currentTarget);
+      } else if (shot.target) {
+        const obj = scene.getObjectByName(shot.target);
+        if (obj) {
+          const currentTarget = new THREE.Vector3();
+          camera.getWorldDirection(currentTarget);
+          currentTarget.add(camera.position);
+          currentTarget.lerp(obj.position, 0.05);
+          camera.lookAt(currentTarget);
+        }
+      }
+      break;
   }
 }
 
-// Helper function for smooth spline interpolation
-function catmullRomSpline(points: THREE.Vector3[], t: number): THREE.Vector3 {
-  const l = points.length;
-  const p = (l - 1) * t;
-  const intPoint = Math.floor(p);
-  const weight = p - intPoint;
+// Comprehensive easing functions for smooth camera movements
+function applyEasing(t: number, easing: string): number {
+  // Clamp t to [0, 1]
+  t = Math.max(0, Math.min(1, t));
 
-  const p0 = points[intPoint === 0 ? intPoint : intPoint - 1];
-  const p1 = points[intPoint];
-  const p2 = points[intPoint > l - 2 ? l - 1 : intPoint + 1];
-  const p3 = points[intPoint > l - 3 ? l - 1 : intPoint + 2];
+  switch (easing) {
+    case 'linear':
+      return t;
 
-  const result = new THREE.Vector3();
+    // Quadratic easing
+    case 'ease-in':
+    case 'ease-in-quad':
+      return t * t;
+    case 'ease-out':
+    case 'ease-out-quad':
+      return t * (2 - t);
+    case 'ease-in-out':
+    case 'ease-in-out-quad':
+      return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 
-  result.x = catmullRomInterpolate(p0.x, p1.x, p2.x, p3.x, weight);
-  result.y = catmullRomInterpolate(p0.y, p1.y, p2.y, p3.y, weight);
-  result.z = catmullRomInterpolate(p0.z, p1.z, p2.z, p3.z, weight);
+    // Cubic easing
+    case 'ease-in-cubic':
+      return t * t * t;
+    case 'ease-out-cubic':
+      return --t * t * t + 1;
+    case 'ease-in-out-cubic':
+      return t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1;
 
-  return result;
+    // Quartic easing
+    case 'ease-in-quart':
+      return t * t * t * t;
+    case 'ease-out-quart':
+      return 1 - --t * t * t * t;
+    case 'ease-in-out-quart':
+      return t < 0.5 ? 8 * t * t * t * t : 1 - 8 * --t * t * t * t;
+
+    // Quintic easing
+    case 'ease-in-quint':
+      return t * t * t * t * t;
+    case 'ease-out-quint':
+      return 1 + --t * t * t * t * t;
+    case 'ease-in-out-quint':
+      return t < 0.5 ? 16 * t * t * t * t * t : 1 + 16 * --t * t * t * t * t;
+
+    // Sine easing
+    case 'ease-in-sine':
+      return 1 - Math.cos((t * Math.PI) / 2);
+    case 'ease-out-sine':
+      return Math.sin((t * Math.PI) / 2);
+    case 'ease-in-out-sine':
+      return -(Math.cos(Math.PI * t) - 1) / 2;
+
+    // Exponential easing
+    case 'ease-in-expo':
+      return t === 0 ? 0 : Math.pow(2, 10 * t - 10);
+    case 'ease-out-expo':
+      return t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
+    case 'ease-in-out-expo':
+      return t === 0
+        ? 0
+        : t === 1
+        ? 1
+        : t < 0.5
+        ? Math.pow(2, 20 * t - 10) / 2
+        : (2 - Math.pow(2, -20 * t + 10)) / 2;
+
+    // Circular easing
+    case 'ease-in-circ':
+      return 1 - Math.sqrt(1 - Math.pow(t, 2));
+    case 'ease-out-circ':
+      return Math.sqrt(1 - Math.pow(t - 1, 2));
+    case 'ease-in-out-circ':
+      return t < 0.5
+        ? (1 - Math.sqrt(1 - Math.pow(2 * t, 2))) / 2
+        : (Math.sqrt(1 - Math.pow(-2 * t + 2, 2)) + 1) / 2;
+
+    // Back easing (overshoots)
+    case 'ease-in-back': {
+      const c1 = 1.70158;
+      const c3 = c1 + 1;
+      return c3 * t * t * t - c1 * t * t;
+    }
+    case 'ease-out-back': {
+      const c1 = 1.70158;
+      const c3 = c1 + 1;
+      return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+    }
+    case 'ease-in-out-back': {
+      const c1 = 1.70158;
+      const c2 = c1 * 1.525;
+      return t < 0.5
+        ? (Math.pow(2 * t, 2) * ((c2 + 1) * 2 * t - c2)) / 2
+        : (Math.pow(2 * t - 2, 2) * ((c2 + 1) * (t * 2 - 2) + c2) + 2) / 2;
+    }
+
+    // Elastic easing (spring-like)
+    case 'ease-in-elastic': {
+      const c4 = (2 * Math.PI) / 3;
+      return t === 0
+        ? 0
+        : t === 1
+        ? 1
+        : -Math.pow(2, 10 * t - 10) * Math.sin((t * 10 - 10.75) * c4);
+    }
+    case 'ease-out-elastic': {
+      const c4 = (2 * Math.PI) / 3;
+      return t === 0
+        ? 0
+        : t === 1
+        ? 1
+        : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1;
+    }
+    case 'ease-in-out-elastic': {
+      const c5 = (2 * Math.PI) / 4.5;
+      return t === 0
+        ? 0
+        : t === 1
+        ? 1
+        : t < 0.5
+        ? -(Math.pow(2, 20 * t - 10) * Math.sin((20 * t - 11.125) * c5)) / 2
+        : (Math.pow(2, -20 * t + 10) * Math.sin((20 * t - 11.125) * c5)) / 2 +
+          1;
+    }
+
+    // Bounce easing
+    case 'ease-out-bounce':
+      return bounceOut(t);
+    case 'ease-in-bounce':
+      return 1 - bounceOut(1 - t);
+    case 'ease-in-out-bounce':
+      return t < 0.5
+        ? (1 - bounceOut(1 - 2 * t)) / 2
+        : (1 + bounceOut(2 * t - 1)) / 2;
+
+    // Cubic bezier (common presets)
+    case 'cubic-bezier-smooth':
+      return cubicBezier(t, 0.25, 0.1, 0.25, 1);
+    case 'cubic-bezier-ease':
+      return cubicBezier(t, 0.42, 0, 1, 1);
+    case 'cubic-bezier-ease-in':
+      return cubicBezier(t, 0.42, 0, 1, 1);
+    case 'cubic-bezier-ease-out':
+      return cubicBezier(t, 0, 0, 0.58, 1);
+    case 'cubic-bezier-ease-in-out':
+      return cubicBezier(t, 0.42, 0, 0.58, 1);
+
+    default:
+      // Default to ease-in-out for smooth cinematic feel
+      return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+  }
 }
 
-function catmullRomInterpolate(
-  p0: number,
+// Helper function for bounce easing
+function bounceOut(t: number): number {
+  const n1 = 7.5625;
+  const d1 = 2.75;
+
+  if (t < 1 / d1) {
+    return n1 * t * t;
+  } else if (t < 2 / d1) {
+    return n1 * (t -= 1.5 / d1) * t + 0.75;
+  } else if (t < 2.5 / d1) {
+    return n1 * (t -= 2.25 / d1) * t + 0.9375;
+  } else {
+    return n1 * (t -= 2.625 / d1) * t + 0.984375;
+  }
+}
+
+// Helper function for cubic bezier easing
+function cubicBezier(
+  t: number,
   p1: number,
   p2: number,
   p3: number,
-  t: number
+  p4: number
 ): number {
-  const v0 = (p2 - p0) * 0.5;
-  const v1 = (p3 - p1) * 0.5;
-  const t2 = t * t;
-  const t3 = t * t2;
+  // Simplified cubic bezier calculation
+  const cx = 3 * p1;
+  const bx = 3 * (p3 - p1) - cx;
+  const ax = 1 - cx - bx;
 
-  return (
-    (2 * p1 - 2 * p2 + v0 + v1) * t3 +
-    (-3 * p1 + 3 * p2 - 2 * v0 - v1) * t2 +
-    v0 * t +
-    p1
-  );
+  const cy = 3 * p2;
+  const by = 3 * (p4 - p2) - cy;
+  const ay = 1 - cy - by;
+
+  const tSquared = t * t;
+  const tCubed = tSquared * t;
+
+  return ay * tCubed + by * tSquared + cy * t;
 }

@@ -1,0 +1,167 @@
+{
+  "id": "volcano-eruption-nighttime-001",
+  "title": "Volcanic Eruption at Night",
+  "style": "nightmare",
+  "created": "2025-10-05T00:00:00Z",
+  "source": "mvp-cinematic-library",
+  "structures": [
+    {
+      "id": "volcano_main",
+      "type": "volcano",
+      "pos": [0, 0, 0],
+      "scale": 3.0,
+      "rotation": [0, 0, 0],
+      "features": ["lava_flow"],
+      "material": {
+        "type": "volcanic_rock",
+        "emissive": 0.3,
+        "roughness": 0.9
+      }
+    }
+  ],
+  "entities": [
+    {
+      "id": "lava_particles",
+      "type": "particle_stream",
+      "count": 120,
+      "params": {
+        "speed": 2.5,
+        "glow": 0.95,
+        "size": 1.2,
+        "color": "#FF4500"
+      },
+      "motion": {
+        "type": "wander",
+        "attachTo": "volcano_main",
+        "offset": [0, 15, 0],
+        "radius": 8,
+        "frequency": 0.8
+      }
+    },
+    {
+      "id": "ash_cloud",
+      "type": "ash_cloud",
+      "count": 1,
+      "params": {
+        "speed": 0.4,
+        "glow": 0.1,
+        "size": 8.0,
+        "color": "#2B2B2B"
+      },
+      "motion": {
+        "type": "wander",
+        "attachTo": "volcano_main",
+        "offset": [0, 18, 0],
+        "radius": 12,
+        "frequency": 0.3
+      }
+    }
+  ],
+  "camera": [
+    {
+      "startTime": 0,
+      "duration": 8,
+      "position": [120, 60, 120],
+      "target": "volcano_main",
+      "fov": 70,
+      "movement": "establish",
+      "easing": "linear",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 8,
+      "duration": 10,
+      "position": [40, 25, 40],
+      "target": "volcano_main",
+      "fov": 55,
+      "movement": "dolly_in",
+      "easing": "ease-in",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 18,
+      "duration": 4,
+      "position": [25, 20, 25],
+      "target": "volcano_main",
+      "fov": 45,
+      "movement": "dolly_in",
+      "easing": "ease-in-out",
+      "transition": "shake"
+    },
+    {
+      "startTime": 22,
+      "duration": 8,
+      "position": [150, 90, 150],
+      "target": "volcano_main",
+      "fov": 80,
+      "movement": "pull_back",
+      "easing": "ease-out",
+      "transition": "smooth"
+    }
+  ],
+  "environment": {
+    "preset": "night",
+    "fog": 0.3,
+    "skyColor": "#1A0A2E",
+    "ambientLight": 0.4,
+    "lighting": {
+      "type": "dramatic",
+      "intensity": 0.6,
+      "color": "#FF6B35"
+    }
+  },
+  "render": {
+    "res": [1280, 720],
+    "fps": 30,
+    "quality": "high"
+  },
+  "events": [
+    {
+      "timeSec": 18,
+      "type": "explosion",
+      "targets": ["volcano_main"],
+      "particleCount": 800,
+      "lightFlash": true,
+      "cameraShake": {
+        "amplitude": 3,
+        "duration": 1.6
+      }
+    },
+    {
+      "timeSec": 18,
+      "type": "environment_change",
+      "params": {
+        "ambientLight": 0.2,
+        "fog": 0.7,
+        "duration": 6
+      }
+    },
+    {
+      "timeSec": 18,
+      "type": "spawn_entity",
+      "entityId": "ash_cloud_expansion",
+      "params": {
+        "type": "ash_cloud",
+        "count": 1,
+        "motion": {
+          "type": "expand",
+          "from": 5,
+          "to": 40,
+          "duration": 6
+        },
+        "particleParams": {
+          "speed": 1.2,
+          "glow": 0.05,
+          "size": 3.0,
+          "color": "#3A3A3A"
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "seed": 789012,
+    "originalText": "A dramatic nighttime volcano eruption with lightning and lava, intense natural disaster cinematics with dynamic events",
+    "requestedStyle": "nightmare",
+    "version": "1.0"
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "id": "550e8400-e29b-41d4-a716-446655440050",
+  "title": "Organic house growing like a tree with butterfly emergence",
+  "style": "surreal",
+  "created": "2025-01-15T16:00:00.000Z",
+  "source": "mcp-gateway",
+  "structures": [
+    {
+      "id": "growing_house",
+      "type": "organic_house",
+      "pos": [0, 0, 0],
+      "scale": 0.1,
+      "rotation": [0, 0, 0],
+      "features": ["animated_textures", "organic_growth"],
+      "material": {
+        "color": "#8B7355",
+        "roughness": 0.7,
+        "metalness": 0.1
+      },
+      "animation": {
+        "type": "scale",
+        "from": 0.1,
+        "to": 1.0,
+        "duration": 21,
+        "easing": "ease-in-out"
+      }
+    }
+  ],
+  "entities": [],
+  "camera": [
+    {
+      "startTime": 0,
+      "duration": 7,
+      "position": [5, 2, 5],
+      "target": "growing_house",
+      "fov": 45,
+      "movement": "dolly_in",
+      "easing": "ease-in-out",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 7,
+      "duration": 15,
+      "position": [20, 15, 20],
+      "target": "growing_house",
+      "fov": 60,
+      "movement": "orbit",
+      "easing": "linear",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 22,
+      "duration": 8,
+      "position": [40, 30, 40],
+      "target": "growing_house",
+      "fov": 75,
+      "movement": "pull_back",
+      "easing": "ease-out",
+      "transition": "smooth"
+    }
+  ],
+  "events": [
+    {
+      "timeSec": 8,
+      "type": "spawn_entity",
+      "entityId": "butterflies_wave_1",
+      "params": {
+        "type": "butterfly",
+        "count": 4,
+        "params": {
+          "speed": 1.0,
+          "glow": 0.4,
+          "size": 0.3,
+          "color": "#FFB6C1"
+        },
+        "motion": {
+          "type": "wander",
+          "attachTo": "growing_house",
+          "offset": [0, 5, 0],
+          "radius": 6
+        }
+      }
+    },
+    {
+      "timeSec": 14,
+      "type": "spawn_entity",
+      "entityId": "butterflies_wave_2",
+      "params": {
+        "type": "butterfly",
+        "count": 4,
+        "params": {
+          "speed": 1.0,
+          "glow": 0.4,
+          "size": 0.3,
+          "color": "#DDA0DD"
+        },
+        "motion": {
+          "type": "wander",
+          "attachTo": "growing_house",
+          "offset": [0, 8, 0],
+          "radius": 6
+        }
+      }
+    },
+    {
+      "timeSec": 21,
+      "type": "spawn_entity",
+      "entityId": "butterflies_wave_3",
+      "params": {
+        "type": "butterfly",
+        "count": 4,
+        "params": {
+          "speed": 1.0,
+          "glow": 0.4,
+          "size": 0.3,
+          "color": "#87CEEB"
+        },
+        "motion": {
+          "type": "wander",
+          "attachTo": "growing_house",
+          "offset": [0, 10, 0],
+          "radius": 6
+        }
+      }
+    }
+  ],
+  "environment": {
+    "preset": "dawn",
+    "fog": 0.25,
+    "skyColor": "#FFE4B5",
+    "ambientLight": 0.75,
+    "skybox": "clouds",
+    "lighting": {
+      "ambient": 0.75,
+      "directional": {
+        "intensity": 0.9,
+        "position": [80, 60, 40],
+        "color": "#FFA07A"
+      }
+    }
+  },
+  "render": {
+    "res": [1280, 720],
+    "fps": 30,
+    "quality": "high"
+  },
+  "metadata": {
+    "seed": 789,
+    "originalText": "An organic house that grows like a tree from a tiny seed to full size over 21 seconds, with rooms unfolding like leaves. Butterflies emerge at growth milestones (8s, 14s, 21s) and wander around the structure.",
+    "requestedStyle": "surreal",
+    "version": "1.0.0"
+  }
+}

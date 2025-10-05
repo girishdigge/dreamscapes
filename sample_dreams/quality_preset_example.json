@@ -1,0 +1,49 @@
+{
+  "id": "quality-preset-demo",
+  "title": "Quality Preset Configuration Example",
+  "style": "ethereal",
+  "environment": {
+    "preset": "sunset",
+    "fog": 0.3
+  },
+  "render": {
+    "res": [1920, 1080],
+    "fps": 60,
+    "qualityPreset": "cinematic",
+    "customQuality": {
+      "shadows": true,
+      "shadowQuality": "high",
+      "geometryDetail": "high",
+      "postProcessing": true,
+      "particleMultiplier": 1.5,
+      "adaptiveQuality": true
+    }
+  },
+  "cinematography": {
+    "durationSec": 30
+  },
+  "structures": [
+    {
+      "id": "sphere1",
+      "type": "sphere",
+      "pos": [0, 10, 0],
+      "scale": 5,
+      "material": {
+        "color": "#4488ff",
+        "metalness": 0.8,
+        "roughness": 0.2
+      }
+    }
+  ],
+  "entities": [
+    {
+      "id": "particles1",
+      "type": "fireflies",
+      "count": 100,
+      "params": {
+        "glow": 0.8,
+        "size": 0.5
+      }
+    }
+  ]
+}

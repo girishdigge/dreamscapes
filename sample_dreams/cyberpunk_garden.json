@@ -66,6 +66,13 @@
         "glow": 0.9,
         "size": 0.8,
         "color": "#00FF41"
+      },
+      "motion": {
+        "type": "wander",
+        "attachTo": "central_nexus",
+        "offset": [0, 0, 0],
+        "radius": 20,
+        "frequency": 0.7
       }
     },
     {
@@ -77,6 +84,12 @@
         "glow": 0.8,
         "size": 1.2,
         "color": "#FF00FF"
+      },
+      "motion": {
+        "type": "wander",
+        "center": [0, 10, 0],
+        "radius": 30,
+        "frequency": 0.6
       }
     },
     {
@@ -88,36 +101,58 @@
         "glow": 1.0,
         "size": 1.5,
         "color": "#00FFFF"
+      },
+      "motion": {
+        "type": "wander",
+        "attachTo": "hologram_platform",
+        "offset": [0, 0, 0],
+        "radius": 15,
+        "frequency": 0.4
       }
     }
   ],
-  "cinematography": {
-    "durationSec": 30,
-    "shots": [
-      {
-        "type": "establish",
-        "duration": 6,
-        "startPos": [60, 40, 60],
-        "endPos": [60, 40, 60]
-      },
-      {
-        "type": "flythrough",
-        "duration": 10,
-        "startPos": [40, 10, 40],
-        "endPos": [-40, 20, -40]
-      },
-      {
-        "type": "orbit",
-        "target": "central_nexus",
-        "duration": 8
-      },
-      {
-        "type": "close_up",
-        "target": "flower_tower_1",
-        "duration": 6
-      }
-    ]
-  },
+  "camera": [
+    {
+      "startTime": 0,
+      "duration": 6,
+      "position": [60, 40, 60],
+      "target": "central_nexus",
+      "fov": 70,
+      "movement": "establish",
+      "easing": "linear",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 6,
+      "duration": 10,
+      "position": [40, 10, 40],
+      "lookAt": [-40, 20, -40],
+      "fov": 65,
+      "movement": "flythrough",
+      "easing": "ease-in-out",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 16,
+      "duration": 8,
+      "position": [50, 30, 50],
+      "target": "central_nexus",
+      "fov": 60,
+      "movement": "orbit",
+      "easing": "linear",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 24,
+      "duration": 6,
+      "position": [25, 15, 25],
+      "target": "flower_tower_1",
+      "fov": 50,
+      "movement": "close_up",
+      "easing": "ease-in-out",
+      "transition": "smooth"
+    }
+  ],
   "render": {
     "res": [1920, 1080],
     "fps": 30,

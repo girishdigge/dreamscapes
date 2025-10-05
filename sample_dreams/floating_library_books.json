@@ -1,0 +1,106 @@
+{
+  "id": "floating-library-books-001",
+  "title": "Ethereal Library Among Clouds with Swirling Books",
+  "style": "ethereal",
+  "created": "2025-10-05T00:00:00Z",
+  "source": "mvp-cinematic-library",
+  "structures": [
+    {
+      "id": "library_main",
+      "type": "library",
+      "pos": [0, 15, 0],
+      "scale": 1.2,
+      "rotation": [0, 0, 0],
+      "features": ["glowing_books", "transparent"],
+      "material": {
+        "type": "glass",
+        "opacity": 0.6,
+        "emissive": "#ffd27a",
+        "emissiveIntensity": 0.4
+      }
+    }
+  ],
+  "entities": [
+    {
+      "id": "book_swarm",
+      "type": "book_swarm",
+      "count": 80,
+      "params": {
+        "speed": 0.6,
+        "glow": 0.9,
+        "size": 0.5,
+        "color": "#ffd27a"
+      },
+      "motion": {
+        "type": "swarm",
+        "attachTo": "library_main",
+        "offset": [0, 0, 0],
+        "radius": 25,
+        "frequency": 0.6,
+        "behaviors": [
+          {
+            "type": "split",
+            "probability": 0.15,
+            "duration": 3,
+            "formShape": "arc",
+            "returnDuration": 2
+          }
+        ]
+      }
+    }
+  ],
+  "camera": [
+    {
+      "startTime": 0,
+      "duration": 8,
+      "position": [0, 50, 0],
+      "target": "library_main",
+      "fov": 70,
+      "movement": "orbit",
+      "easing": "linear",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 8,
+      "duration": 12,
+      "position": [15, 18, 20],
+      "target": "library_main",
+      "fov": 65,
+      "movement": "flythrough",
+      "easing": "ease-in-out",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 20,
+      "duration": 10,
+      "position": [60, 35, 60],
+      "target": "library_main",
+      "fov": 75,
+      "movement": "pull_back",
+      "easing": "ease-out",
+      "transition": "smooth"
+    }
+  ],
+  "environment": {
+    "preset": "clouds/dusk",
+    "fog": 0.35,
+    "skyColor": "#ffb380",
+    "ambientLight": 0.8,
+    "lighting": {
+      "type": "soft",
+      "intensity": 0.9,
+      "color": "#ffe4b3"
+    }
+  },
+  "render": {
+    "res": [1280, 720],
+    "fps": 30,
+    "quality": "medium"
+  },
+  "metadata": {
+    "seed": 42789,
+    "originalText": "A magical floating library among clouds at dusk with swirling glowing books that occasionally split into arcs before returning to the swarm",
+    "requestedStyle": "ethereal",
+    "version": "1.0"
+  }
+}

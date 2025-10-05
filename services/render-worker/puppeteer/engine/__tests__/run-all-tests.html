@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Enhanced 3D Renderer - Test Suite</title>
+    <style>
+      body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+        background: #1e1e1e;
+        color: #d4d4d4;
+      }
+      h1 {
+        color: #4ec9b0;
+        border-bottom: 2px solid #4ec9b0;
+        padding-bottom: 10px;
+      }
+      h2 {
+        color: #569cd6;
+        margin-top: 30px;
+      }
+      .test-suite {
+        background: #252526;
+        border: 1px solid #3e3e42;
+        border-radius: 5px;
+        padding: 15px;
+        margin: 15px 0;
+      }
+      .test-controls {
+        margin: 20px 0;
+      }
+      button {
+        background: #0e639c;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        margin: 5px;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      button:hover {
+        background: #1177bb;
+      }
+      button:disabled {
+        background: #3e3e42;
+        cursor: not-allowed;
+      }
+      .status {
+        display: inline-block;
+        padding: 5px 10px;
+        border-radius: 3px;
+        margin-left: 10px;
+        font-weight: bold;
+      }
+      .status.running {
+        background: #f9a825;
+        color: #000;
+      }
+      .status.passed {
+        background: #4caf50;
+        color: #fff;
+      }
+      .status.failed {
+        background: #f44336;
+        color: #fff;
+      }
+      .status.pending {
+        background: #757575;
+        color: #fff;
+      }
+      .results {
+        margin-top: 20px;
+      }
+      .test-result {
+        padding: 8px;
+        margin: 5px 0;
+        border-radius: 3px;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 13px;
+      }
+      .test-result.pass {
+        background: #1e4620;
+        border-left: 3px solid #4caf50;
+      }
+      .test-result.fail {
+        background: #4a1e1e;
+        border-left: 3px solid #f44336;
+      }
+      .error-message {
+        color: #f48771;
+        margin-left: 20px;
+        font-size: 12px;
+      }
+      .summary {
+        background: #2d2d30;
+        border: 2px solid #4ec9b0;
+        border-radius: 5px;
+        padding: 20px;
+        margin: 20px 0;
+      }
+      .summary-stat {
+        display: inline-block;
+        margin: 0 20px;
+        font-size: 18px;
+      }
+      .summary-stat .label {
+        color: #9cdcfe;
+      }
+      .summary-stat .value {
+        font-weight: bold;
+        font-size: 24px;
+      }
+      .summary-stat.passed .value {
+        color: #4caf50;
+      }
+      .summary-stat.failed .value {
+        color: #f44336;
+      }
+      .summary-stat.total .value {
+        color: #4ec9b0;
+      }
+      #console-output {
+        background: #1e1e1e;
+        border: 1px solid #3e3e42;
+        border-radius: 3px;
+        padding: 15px;
+        margin: 20px 0;
+        max-height: 400px;
+        overflow-y: auto;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 12px;
+      }
+      .console-line {
+        margin: 2px 0;
+      }
+      .console-line.error {
+        color: #f48771;
+      }
+      .console-line.warn {
+        color: #dcdcaa;
+      }
+      .console-line.info {
+        color: #9cdcfe;
+      }
+      canvas {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🧪 Enhanced 3D Renderer - Comprehensive Test Suite</h1>
+
+    <div class="test-controls">
+      <button id="runAllBtn" onclick="runAllTests()">▶ Run All Tests</button>
+      <button id="runUnitBtn" onclick="runUnitTests()">
+        Run Unit Tests Only
+      </button>
+      <button id="runIntegrationBtn" onclick="runIntegrationTests()">
+        Run Integration Tests
+      </button>
+      <button id="clearBtn" onclick="clearResults()">Clear Results</button>
+    </div>
+
+    <div class="summary" id="summary" style="display: none">
+      <div class="summary-stat total">
+        <span class="label">Total:</span>
+        <span class="value" id="totalTests">0</span>
+      </div>
+      <div class="summary-stat passed">
+        <span class="label">Passed:</span>
+        <span class="value" id="passedTests">0</span>
+      </div>
+      <div class="summary-stat failed">
+        <span class="label">Failed:</span>
+        <span class="value" id="failedTests">0</span>
+      </div>
+      <div class="summary-stat">
+        <span class="label">Duration:</span>
+        <span class="value" id="duration">0s</span>
+      </div>
+    </div>
+
+    <div class="test-suite">
+      <h2>
+        12.1 SceneRenderer Tests
+        <span class="status pending" id="status-scene">Pending</span>
+      </h2>
+      <div class="results" id="results-scene"></div>
+    </div>
+
+    <div class="test-suite">
+      <h2>
+        12.2 AssetLibrary Tests
+        <span class="status pending" id="status-asset">Pending</span>
+      </h2>
+      <div class="results" id="results-asset"></div>
+    </div>
+
+    <div class="test-suite">
+      <h2>
+        12.3 MaterialSystem Tests
+        <span class="status pending" id="status-material">Pending</span>
+      </h2>
+      <div class="results" id="results-material"></div>
+    </div>
+
+    <div class="test-suite">
+      <h2>
+        12.4 AnimationController Tests
+        <span class="status pending" id="status-animation">Pending</span>
+      </h2>
+      <div class="results" id="results-animation"></div>
+    </div>
+
+    <div class="test-suite">
+      <h2>
+        12.5 CameraController Tests
+        <span class="status pending" id="status-camera">Pending</span>
+      </h2>
+      <div class="results" id="results-camera"></div>
+    </div>
+
+    <div class="test-suite">
+      <h2>
+        12.6 Integration Tests
+        <span class="status pending" id="status-integration">Pending</span>
+      </h2>
+      <div class="results" id="results-integration"></div>
+    </div>
+
+    <div class="test-suite">
+      <h2>
+        12.7 Visual Regression Tests
+        <span class="status pending" id="status-visual">Pending</span>
+      </h2>
+      <div class="results" id="results-visual"></div>
+    </div>
+
+    <h2>Console Output</h2>
+    <div id="console-output"></div>
+
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <!-- Engine modules -->
+    <script src="../SceneRenderer.js"></script>
+    <script src="../AssetLibrary.js"></script>
+    <script src="../MaterialSystem.js"></script>
+    <script src="../AnimationController.js"></script>
+    <script src="../CameraController.js"></script>
+
+    <!-- Test files -->
+    <script src="./SceneRenderer.test.js"></script>
+    <script src="./AssetLibrary.test.js"></script>
+    <script src="./MaterialSystem.test.js"></script>
+    <script src="./AnimationController.test.js"></script>
+    <script src="./CameraController.test.js"></script>
+    <script src="./integration.test.js"></script>
+    <script src="./visual-regression.test.js"></script>
+
+    <script>
+      // Console capture
+      const consoleOutput = document.getElementById('console-output');
+      const originalConsole = {
+        log: console.log,
+        error: console.error,
+        warn: console.warn,
+      };
+
+      function addConsoleLine(message, type = 'info') {
+        const line = document.createElement('div');
+        line.className = `console-line ${type}`;
+        line.textContent = message;
+        consoleOutput.appendChild(line);
+        consoleOutput.scrollTop = consoleOutput.scrollHeight;
+      }
+
+      console.log = function (...args) {
+        originalConsole.log.apply(console, args);
+        addConsoleLine(args.join(' '), 'info');
+      };
+
+      console.error = function (...args) {
+        originalConsole.error.apply(console, args);
+        addConsoleLine(args.join(' '), 'error');
+      };
+
+      console.warn = function (...args) {
+        originalConsole.warn.apply(console, args);
+        addConsoleLine(args.join(' '), 'warn');
+      };
+
+      // Test runner
+      let totalPassed = 0;
+      let totalFailed = 0;
+      let startTime = 0;
+
+      function updateStatus(id, status) {
+        const statusEl = document.getElementById(`status-${id}`);
+        statusEl.className = `status ${status}`;
+        statusEl.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+      }
+
+      function displayResults(id, results) {
+        const resultsEl = document.getElementById(`results-${id}`);
+        resultsEl.innerHTML = '';
+
+        results.results.forEach((result) => {
+          const div = document.createElement('div');
+          div.className = `test-result ${
+            result.status === 'PASS' ? 'pass' : 'fail'
+          }`;
+          div.textContent = `${result.status === 'PASS' ? '✓' : '✗'} ${
+            result.test
+          }`;
+
+          if (result.error) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+            errorDiv.textContent = result.error;
+            div.appendChild(errorDiv);
+          }
+
+          resultsEl.appendChild(div);
+        });
+      }
+
+      function updateSummary() {
+        document.getElementById('summary').style.display = 'block';
+        document.getElementById('totalTests').textContent =
+          totalPassed + totalFailed;
+        document.getElementById('passedTests').textContent = totalPassed;
+        document.getElementById('failedTests').textContent = totalFailed;
+
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        document.getElementById('duration').textContent = `${duration}s`;
+      }
+
+      async function runTestSuite(name, TestClass, id) {
+        updateStatus(id, 'running');
+
+        try {
+          const tests = new TestClass();
+          const results = await tests.runAll();
+
+          totalPassed += results.passed;
+          totalFailed += results.failed;
+
+          displayResults(id, results);
+          updateStatus(id, results.failed === 0 ? 'passed' : 'failed');
+
+          return results;
+        } catch (error) {
+          console.error(`Error running ${name}:`, error);
+          updateStatus(id, 'failed');
+          return { passed: 0, failed: 1, results: [] };
+        }
+      }
+
+      async function runAllTests() {
+        clearResults();
+        startTime = Date.now();
+
+        document.getElementById('runAllBtn').disabled = true;
+        document.getElementById('runUnitBtn').disabled = true;
+        document.getElementById('runIntegrationBtn').disabled = true;
+
+        console.log('='.repeat(60));
+        console.log('Starting Comprehensive Test Suite');
+        console.log('='.repeat(60));
+
+        // Run all test suites
+        await runTestSuite('SceneRenderer', SceneRendererTests, 'scene');
+        await runTestSuite('AssetLibrary', AssetLibraryTests, 'asset');
+        await runTestSuite('MaterialSystem', MaterialSystemTests, 'material');
+        await runTestSuite(
+          'AnimationController',
+          AnimationControllerTests,
+          'animation'
+        );
+        await runTestSuite('CameraController', CameraControllerTests, 'camera');
+        await runTestSuite('Integration', IntegrationTests, 'integration');
+        await runTestSuite(
+          'Visual Regression',
+          VisualRegressionTests,
+          'visual'
+        );
+
+        updateSummary();
+
+        console.log('='.repeat(60));
+        console.log(
+          `Test Suite Complete: ${totalPassed} passed, ${totalFailed} failed`
+        );
+        console.log('='.repeat(60));
+
+        document.getElementById('runAllBtn').disabled = false;
+        document.getElementById('runUnitBtn').disabled = false;
+        document.getElementById('runIntegrationBtn').disabled = false;
+      }
+
+      async function runUnitTests() {
+        clearResults();
+        startTime = Date.now();
+
+        document.getElementById('runAllBtn').disabled = true;
+        document.getElementById('runUnitBtn').disabled = true;
+        document.getElementById('runIntegrationBtn').disabled = true;
+
+        console.log('='.repeat(60));
+        console.log('Starting Unit Tests');
+        console.log('='.repeat(60));
+
+        await runTestSuite('SceneRenderer', SceneRendererTests, 'scene');
+        await runTestSuite('AssetLibrary', AssetLibraryTests, 'asset');
+        await runTestSuite('MaterialSystem', MaterialSystemTests, 'material');
+        await runTestSuite(
+          'AnimationController',
+          AnimationControllerTests,
+          'animation'
+        );
+        await runTestSuite('CameraController', CameraControllerTests, 'camera');
+
+        updateSummary();
+
+        console.log('='.repeat(60));
+        console.log(
+          `Unit Tests Complete: ${totalPassed} passed, ${totalFailed} failed`
+        );
+        console.log('='.repeat(60));
+
+        document.getElementById('runAllBtn').disabled = false;
+        document.getElementById('runUnitBtn').disabled = false;
+        document.getElementById('runIntegrationBtn').disabled = false;
+      }
+
+      async function runIntegrationTests() {
+        clearResults();
+        startTime = Date.now();
+
+        document.getElementById('runAllBtn').disabled = true;
+        document.getElementById('runUnitBtn').disabled = true;
+        document.getElementById('runIntegrationBtn').disabled = true;
+
+        console.log('='.repeat(60));
+        console.log('Starting Integration Tests');
+        console.log('='.repeat(60));
+
+        await runTestSuite('Integration', IntegrationTests, 'integration');
+        await runTestSuite(
+          'Visual Regression',
+          VisualRegressionTests,
+          'visual'
+        );
+
+        updateSummary();
+
+        console.log('='.repeat(60));
+        console.log(
+          `Integration Tests Complete: ${totalPassed} passed, ${totalFailed} failed`
+        );
+        console.log('='.repeat(60));
+
+        document.getElementById('runAllBtn').disabled = false;
+        document.getElementById('runUnitBtn').disabled = false;
+        document.getElementById('runIntegrationBtn').disabled = false;
+      }
+
+      function clearResults() {
+        totalPassed = 0;
+        totalFailed = 0;
+        consoleOutput.innerHTML = '';
+        document.getElementById('summary').style.display = 'none';
+
+        [
+          'scene',
+          'asset',
+          'material',
+          'animation',
+          'camera',
+          'integration',
+          'visual',
+        ].forEach((id) => {
+          updateStatus(id, 'pending');
+          document.getElementById(`results-${id}`).innerHTML = '';
+        });
+      }
+
+      // Auto-run on load (optional)
+      // window.addEventListener('load', () => {
+      //     setTimeout(runAllTests, 1000);
+      // });
+    </script>
+  </body>
+</html>

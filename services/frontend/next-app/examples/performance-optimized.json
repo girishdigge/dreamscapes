@@ -1,0 +1,92 @@
+{
+  "id": "performance_optimized_example",
+  "title": "Performance Optimized Scene",
+  "description": "A scene optimized for maximum performance on lower-end hardware",
+  "style": "fantasy",
+  "environment": {
+    "preset": "forest",
+    "fog": true
+  },
+  "render": {
+    "qualityPreset": "performance",
+    "res": [1280, 720],
+    "fps": 60,
+    "quality": "draft",
+    "customQuality": {
+      "adaptiveQuality": true,
+      "targetFPS": 60,
+      "shadows": true,
+      "shadowQuality": "low",
+      "geometryDetail": "low",
+      "postProcessing": {
+        "enabled": false
+      }
+    }
+  },
+  "cinematography": {
+    "durationSec": 15,
+    "shots": [
+      {
+        "type": "flythrough",
+        "startTime": 0,
+        "duration": 15,
+        "position": [0, 10, 50],
+        "lookAt": [0, 5, 0],
+        "fov": 45,
+        "easing": "linear",
+        "speed": 2.0
+      }
+    ]
+  },
+  "structures": [
+    {
+      "id": "tree_1",
+      "type": "tree",
+      "position": [-15, 0, 0],
+      "scale": [4, 6, 4],
+      "color": "#228B22",
+      "material": {
+        "metalness": 0.0,
+        "roughness": 1.0
+      }
+    },
+    {
+      "id": "tree_2",
+      "type": "tree",
+      "position": [15, 0, -10],
+      "scale": [3, 5, 3],
+      "color": "#2E8B57",
+      "material": {
+        "metalness": 0.0,
+        "roughness": 1.0
+      }
+    },
+    {
+      "id": "rock_1",
+      "type": "sphere",
+      "position": [0, 0, -5],
+      "scale": [3, 2, 3],
+      "color": "#696969",
+      "material": {
+        "metalness": 0.0,
+        "roughness": 0.9
+      }
+    }
+  ],
+  "entities": [
+    {
+      "id": "butterflies",
+      "type": "flock",
+      "subtype": "butterfly",
+      "count": 20,
+      "position": [0, 5, 0],
+      "spread": [10, 5, 10],
+      "color": "#FF69B4",
+      "size": 0.2,
+      "motion": {
+        "type": "flock",
+        "speed": 1.5
+      }
+    }
+  ]
+}

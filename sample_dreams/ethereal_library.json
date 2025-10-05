@@ -66,6 +66,13 @@
         "glow": 0.4,
         "size": 1.0,
         "color": "#F5DEB3"
+      },
+      "motion": {
+        "type": "swarm",
+        "attachTo": "main_library",
+        "offset": [0, 0, 0],
+        "radius": 30,
+        "frequency": 0.5
       }
     },
     {
@@ -77,6 +84,13 @@
         "glow": 0.3,
         "size": 0.5,
         "color": "#FFFFFF"
+      },
+      "motion": {
+        "type": "wander",
+        "attachTo": "main_library",
+        "offset": [0, 5, 0],
+        "radius": 25,
+        "frequency": 0.4
       }
     },
     {
@@ -88,42 +102,67 @@
         "glow": 0.8,
         "size": 1.8,
         "color": "#FFD700"
+      },
+      "motion": {
+        "type": "wander",
+        "center": [0, 10, 0],
+        "radius": 35,
+        "frequency": 0.3
       }
     }
   ],
-  "cinematography": {
-    "durationSec": 40,
-    "shots": [
-      {
-        "type": "establish",
-        "duration": 8,
-        "startPos": [70, 50, 70],
-        "endPos": [70, 50, 70]
-      },
-      {
-        "type": "flythrough",
-        "duration": 12,
-        "startPos": [50, 20, 50],
-        "endPos": [-30, 15, -30]
-      },
-      {
-        "type": "orbit",
-        "target": "main_library",
-        "duration": 10
-      },
-      {
-        "type": "close_up",
-        "target": "portal_arch",
-        "duration": 6
-      },
-      {
-        "type": "pull_back",
-        "duration": 4,
-        "startPos": [10, 10, 10],
-        "endPos": [80, 60, 80]
-      }
-    ]
-  },
+  "camera": [
+    {
+      "startTime": 0,
+      "duration": 8,
+      "position": [70, 50, 70],
+      "target": "main_library",
+      "fov": 70,
+      "movement": "establish",
+      "easing": "linear",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 8,
+      "duration": 12,
+      "position": [50, 20, 50],
+      "lookAt": [-30, 15, -30],
+      "fov": 65,
+      "movement": "flythrough",
+      "easing": "ease-in-out",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 20,
+      "duration": 10,
+      "position": [60, 40, 60],
+      "target": "main_library",
+      "fov": 60,
+      "movement": "orbit",
+      "easing": "linear",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 30,
+      "duration": 6,
+      "position": [20, 15, 20],
+      "target": "portal_arch",
+      "fov": 50,
+      "movement": "close_up",
+      "easing": "ease-in-out",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 36,
+      "duration": 4,
+      "position": [80, 60, 80],
+      "lookAt": [0, 0, 0],
+      "fov": 75,
+      "movement": "pull_back",
+      "easing": "ease-out",
+      "transition": "smooth"
+    }
+  ],
   "render": {
     "res": [1920, 1080],
     "fps": 30,

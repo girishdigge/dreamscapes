@@ -7,6 +7,7 @@ import DreamScene from './components/DreamScene';
 import DreamControls from './components/DreamControls';
 import DebugPanel from './components/DebugPanel';
 import ErrorBoundary from './components/ErrorBoundary';
+import SampleDreams from './components/SampleDreams';
 import { Dream } from './types/dream';
 
 export default function Home() {
@@ -324,39 +325,10 @@ export default function Home() {
 
           {/* Sample Dreams */}
           {isClient && (
-            <div className='bg-white/5 rounded-lg p-4'>
-              <h3 className='text-lg font-semibold mb-3'>
-                ✨ Try These Dreams
-              </h3>
-              <div className='space-y-2'>
-                {[
-                  {
-                    text: 'A floating library with glowing books spelling words in the air',
-                    style: 'ethereal',
-                  },
-                  {
-                    text: 'Neon butterflies dancing around a crystal tower in digital void',
-                    style: 'cyberpunk',
-                  },
-                  {
-                    text: 'A house growing like a tree with rooms as leaves floating in clouds',
-                    style: 'surreal',
-                  },
-                ].map((sample, i) => (
-                  <button
-                    key={i}
-                    onClick={() =>
-                      handleGenerateDream(sample.text, sample.style)
-                    }
-                    disabled={isGenerating}
-                    className='w-full text-left p-3 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors disabled:opacity-50'
-                  >
-                    <span className='text-cyan-400'>{sample.style}:</span>{' '}
-                    {sample.text}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <SampleDreams
+              onSelectDream={setDream}
+              isGenerating={isGenerating}
+            />
           )}
         </div>
 

@@ -117,8 +117,13 @@
         "speed": 1.0,
         "glow": 0.6,
         "size": 0.5,
-        "color": "#FFFFFF",
-        "behavior": "flow"
+        "color": "#FFFFFF"
+      },
+      "motion": {
+        "type": "wander",
+        "center": [0, 0, 0],
+        "radius": 50,
+        "frequency": 0.5
       }
     },
     {
@@ -130,6 +135,13 @@
         "glow": 0.9,
         "size": 1.2,
         "color": "#FFD700"
+      },
+      "motion": {
+        "type": "wander",
+        "attachTo": "central_star",
+        "offset": [0, 0, 0],
+        "radius": 40,
+        "frequency": 0.4
       }
     },
     {
@@ -141,42 +153,67 @@
         "glow": 0.7,
         "size": 0.8,
         "color": "#00FFFF"
+      },
+      "motion": {
+        "type": "wander",
+        "center": [0, 0, 0],
+        "radius": 60,
+        "frequency": 0.6
       }
     }
   ],
-  "cinematography": {
-    "durationSec": 45,
-    "shots": [
-      {
-        "type": "establish",
-        "duration": 8,
-        "startPos": [100, 80, 100],
-        "endPos": [100, 80, 100]
-      },
-      {
-        "type": "orbit",
-        "target": "central_star",
-        "duration": 15
-      },
-      {
-        "type": "flythrough",
-        "duration": 12,
-        "startPos": [60, 30, 60],
-        "endPos": [-60, 40, -60]
-      },
-      {
-        "type": "close_up",
-        "target": "crystal_1",
-        "duration": 6
-      },
-      {
-        "type": "pull_back",
-        "duration": 4,
-        "startPos": [20, 20, 20],
-        "endPos": [120, 100, 120]
-      }
-    ]
-  },
+  "camera": [
+    {
+      "startTime": 0,
+      "duration": 8,
+      "position": [100, 80, 100],
+      "target": "central_star",
+      "fov": 70,
+      "movement": "establish",
+      "easing": "linear",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 8,
+      "duration": 15,
+      "position": [80, 60, 80],
+      "target": "central_star",
+      "fov": 65,
+      "movement": "orbit",
+      "easing": "linear",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 23,
+      "duration": 12,
+      "position": [60, 30, 60],
+      "lookAt": [-60, 40, -60],
+      "fov": 60,
+      "movement": "flythrough",
+      "easing": "ease-in-out",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 35,
+      "duration": 6,
+      "position": [30, 20, 30],
+      "target": "crystal_1",
+      "fov": 50,
+      "movement": "close_up",
+      "easing": "ease-in-out",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 41,
+      "duration": 4,
+      "position": [120, 100, 120],
+      "lookAt": [0, 0, 0],
+      "fov": 75,
+      "movement": "pull_back",
+      "easing": "ease-out",
+      "transition": "smooth"
+    }
+  ],
   "render": {
     "res": [1920, 1080],
     "fps": 30,

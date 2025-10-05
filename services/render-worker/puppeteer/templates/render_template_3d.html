@@ -70,6 +70,5261 @@
         // ========================================================================
 
         // ========================================================================
+        // MaterialSystem
+        // ========================================================================
+/**
+ * MaterialSystem - Advanced material creation and shader management
+ * Creates PBR materials, custom shaders, and skyboxes
+ */
+
+class MaterialSystem {
+  constructor(options = {}) {
+    this.options = options;
+    this.materialCache = new Map();
+    this.textureCache = new Map();
+    this.textureLoader = new THREE.TextureLoader();
+    this.shaderMaterials = new Set(); // Track materials with uniforms to update
+  }
+
+  // ============================================================================
+  // TASK 4.1: Material Caching and Texture Loading
+  // ============================================================================
+
+  /**
+   * Get cached material or create new one
+   * @param {string} key - Cache key
+   * @param {Function} createFn - Function to create material if not cached
+   * @returns {THREE.Material} - Cached or new material
+   */
+  getCachedMaterial(key, createFn) {
+    if (!this.materialCache.has(key)) {
+      this.materialCache.set(key, createFn());
+    }
+    return this.materialCache.get(key);
+  }
+
+  /**
+   * Load texture with caching
+   * @param {string} url - Texture URL
+   * @returns {THREE.Texture} - Loaded texture
+   */
+  loadTexture(url) {
+    if (!this.textureCache.has(url)) {
+      const texture = this.textureLoader.load(url);
+      this.textureCache.set(url, texture);
+    }
+    return this.textureCache.get(url);
+  }
+
+  /**
+   * Dispose all cached materials and textures
+   */
+  dispose() {
+    this.materialCache.forEach((material) => material.dispose());
+    this.materialCache.clear();
+    this.textureCache.forEach((texture) => texture.dispose());
+    this.textureCache.clear();
+    this.shaderMaterials.clear();
+  }
+
+  // ============================================================================
+  // TASK 4.2: Skybox Materials with Custom Shaders
+  // ============================================================================
+
+  /**
+   * Create skybox based on type
+   * @param {string} type - Skybox type (galaxy, nebula, sunset, underwater, void)
+   * @returns {THREE.Mesh} - Skybox mesh with material
+   */
+  createSkybox(type) {
+    let material;
+
+    switch (type) {
+      case 'galaxy':
+        material = this.createGalaxySkybox();
+        break;
+      case 'nebula':
+        material = this.createNebulaSkybox();
+        break;
+      case 'sunset':
+        material = this.createSunsetSkybox();
+        break;
+      case 'underwater':
+        material = this.createUnderwaterSkybox();
+        break;
+      case 'void':
+        material = this.createVoidSkybox();
+        break;
+      default:
+        console.warn(`Unknown skybox type: ${type}, using void`);
+        material = this.createVoidSkybox();
+    }
+
+    // Create skybox geometry (large sphere)
+    const geometry = new THREE.SphereGeometry(5000, 32, 32);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `skybox-${type}`;
+
+    return mesh;
+  }
+
+  /**
+   * Create galaxy skybox with spiral arms and stars (GLSL shader)
+   * @returns {THREE.ShaderMaterial} - Galaxy skybox material
+   */
+  createGalaxySkybox() {
+    const vertexShader = `
+      // Galaxy Skybox Vertex Shader
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+
+    const fragmentShader = `
+      // Galaxy Skybox Fragment Shader
+      uniform float time;
+      varying vec3 vWorldPosition;
+
+      float random(vec2 st) {
+        return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+      }
+
+      void main() {
+        vec3 direction = normalize(vWorldPosition);
+        float angle = atan(direction.x, direction.z);
+        float radius = length(direction.xz);
+        
+        // Spiral arms pattern
+        float spiral = sin(angle * 3.0 + radius * 10.0 + time * 0.1) * 0.5 + 0.5;
+        
+        // Star field
+        vec2 starCoord = direction.xy * 100.0;
+        float stars = step(0.99, random(floor(starCoord)));
+        
+        // Nebula base color (purple/blue gradient)
+        vec3 nebulaColor = mix(vec3(0.1, 0.05, 0.2), vec3(0.8, 0.4, 0.9), spiral * 0.3);
+        
+        // Add stars
+        vec3 color = nebulaColor + stars * vec3(1.0, 0.9, 0.8);
+        
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+    const material = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms: {
+        time: { value: 0.0 },
+      },
+      side: THREE.BackSide,
+      depthWrite: false,
+    });
+
+    this.shaderMaterials.add(material);
+    return material;
+  }
+
+  /**
+   * Create nebula skybox with volumetric clouds (GLSL shader)
+   * @returns {THREE.ShaderMaterial} - Nebula skybox material
+   */
+  createNebulaSkybox() {
+    const vertexShader = `
+      // Nebula Skybox Vertex Shader
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+
+    const fragmentShader = `
+      // Nebula Skybox Fragment Shader
+      uniform float time;
+      varying vec3 vWorldPosition;
+
+      float noise(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        
+        float n = i.x + i.y * 57.0 + i.z * 113.0;
+        return mix(
+          mix(
+            mix(fract(sin(n) * 43758.5453), fract(sin(n + 1.0) * 43758.5453), f.x),
+            mix(fract(sin(n + 57.0) * 43758.5453), fract(sin(n + 58.0) * 43758.5453), f.x),
+            f.y
+          ),
+          mix(
+            mix(fract(sin(n + 113.0) * 43758.5453), fract(sin(n + 114.0) * 43758.5453), f.x),
+            mix(fract(sin(n + 170.0) * 43758.5453), fract(sin(n + 171.0) * 43758.5453), f.x),
+            f.y
+          ),
+          f.z
+        );
+      }
+
+      void main() {
+        vec3 direction = normalize(vWorldPosition);
+        
+        // Multi-octave noise for volumetric clouds
+        float n = 0.0;
+        n += noise(direction * 2.0 + time * 0.05) * 0.5;
+        n += noise(direction * 4.0 + time * 0.1) * 0.25;
+        n += noise(direction * 8.0 + time * 0.15) * 0.125;
+        
+        // Color gradient (pink to purple to blue)
+        vec3 color1 = vec3(0.8, 0.2, 0.5); // Pink
+        vec3 color2 = vec3(0.4, 0.1, 0.8); // Purple
+        vec3 color3 = vec3(0.1, 0.3, 0.9); // Blue
+        
+        vec3 color = mix(color1, color2, n);
+        color = mix(color, color3, n * n);
+        
+        // Add some brightness variation
+        color *= 0.5 + n * 0.5;
+        
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+    const material = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms: {
+        time: { value: 0.0 },
+      },
+      side: THREE.BackSide,
+      depthWrite: false,
+    });
+
+    this.shaderMaterials.add(material);
+    return material;
+  }
+
+  /**
+   * Create sunset skybox with gradient and sun
+   * @returns {THREE.ShaderMaterial} - Sunset skybox material
+   */
+  createSunsetSkybox() {
+    const vertexShader = `
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+
+    const fragmentShader = `
+      uniform float time;
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec3 direction = normalize(vWorldPosition);
+        
+        // Vertical gradient from horizon to sky
+        float height = direction.y;
+        
+        // Sunset colors
+        vec3 skyColor = vec3(0.1, 0.2, 0.4); // Dark blue
+        vec3 horizonColor = vec3(1.0, 0.6, 0.3); // Orange
+        vec3 sunColor = vec3(1.0, 0.9, 0.7); // Yellow-white
+        
+        // Gradient from sky to horizon
+        float gradientFactor = smoothstep(-0.2, 0.3, height);
+        vec3 color = mix(horizonColor, skyColor, gradientFactor);
+        
+        // Add sun
+        vec3 sunDirection = normalize(vec3(0.5, -0.1, -1.0));
+        float sunDot = dot(direction, sunDirection);
+        float sun = smoothstep(0.995, 0.998, sunDot);
+        float sunGlow = smoothstep(0.95, 0.998, sunDot) * 0.3;
+        
+        color = mix(color, sunColor, sun + sunGlow);
+        
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+    const material = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms: {
+        time: { value: 0.0 },
+      },
+      side: THREE.BackSide,
+      depthWrite: false,
+    });
+
+    this.shaderMaterials.add(material);
+    return material;
+  }
+
+  /**
+   * Create underwater skybox with caustics and bubbles
+   * @returns {THREE.ShaderMaterial} - Underwater skybox material
+   */
+  createUnderwaterSkybox() {
+    const vertexShader = `
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+
+    const fragmentShader = `
+      uniform float time;
+      varying vec3 vWorldPosition;
+
+      float random(vec2 st) {
+        return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+      }
+
+      void main() {
+        vec3 direction = normalize(vWorldPosition);
+        
+        // Base underwater blue-green color
+        vec3 deepColor = vec3(0.0, 0.1, 0.3); // Deep blue
+        vec3 shallowColor = vec3(0.0, 0.4, 0.6); // Lighter blue
+        
+        // Vertical gradient
+        float depth = direction.y * 0.5 + 0.5;
+        vec3 color = mix(deepColor, shallowColor, depth);
+        
+        // Caustics effect (animated light patterns)
+        vec2 causticsCoord = direction.xz * 5.0 + time * 0.1;
+        float caustics = sin(causticsCoord.x * 3.0) * cos(causticsCoord.y * 3.0);
+        caustics += sin(causticsCoord.x * 5.0 + time * 0.2) * cos(causticsCoord.y * 5.0 + time * 0.2);
+        caustics = caustics * 0.1 + 0.9;
+        
+        color *= caustics;
+        
+        // Add some bubbles
+        vec2 bubbleCoord = direction.xy * 50.0;
+        float bubbles = step(0.995, random(floor(bubbleCoord + time * 0.5)));
+        color += bubbles * vec3(0.3, 0.5, 0.7);
+        
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+    const material = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms: {
+        time: { value: 0.0 },
+      },
+      side: THREE.BackSide,
+      depthWrite: false,
+    });
+
+    this.shaderMaterials.add(material);
+    return material;
+  }
+
+  /**
+   * Create void skybox with deep space and stars
+   * @returns {THREE.ShaderMaterial} - Void skybox material
+   */
+  createVoidSkybox() {
+    const vertexShader = `
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+
+    const fragmentShader = `
+      uniform float time;
+      varying vec3 vWorldPosition;
+
+      float random(vec2 st) {
+        return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+      }
+
+      void main() {
+        vec3 direction = normalize(vWorldPosition);
+        
+        // Very dark space background
+        vec3 color = vec3(0.01, 0.01, 0.02);
+        
+        // Dense star field with varying sizes
+        vec2 starCoord1 = direction.xy * 100.0;
+        float stars1 = step(0.99, random(floor(starCoord1)));
+        
+        vec2 starCoord2 = direction.yz * 150.0;
+        float stars2 = step(0.995, random(floor(starCoord2))) * 0.7;
+        
+        vec2 starCoord3 = direction.xz * 200.0;
+        float stars3 = step(0.997, random(floor(starCoord3))) * 0.5;
+        
+        // Add stars with slight color variation
+        float starBrightness = stars1 + stars2 + stars3;
+        vec3 starColor = vec3(1.0, 0.95, 0.9);
+        color += starBrightness * starColor;
+        
+        // Add some distant nebula hints
+        float nebula = random(floor(direction.xy * 10.0)) * 0.05;
+        color += vec3(0.1, 0.05, 0.15) * nebula;
+        
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+    const material = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms: {
+        time: { value: 0.0 },
+      },
+      side: THREE.BackSide,
+      depthWrite: false,
+    });
+
+    this.shaderMaterials.add(material);
+    return material;
+  }
+
+  // ============================================================================
+  // TASK 4.3: Standard Material Creators
+  // ============================================================================
+
+  /**
+   * Create PBR material with metalness, roughness, transmission
+   * @param {Object} params - Material parameters
+   * @param {string} params.color - Base color (hex string)
+   * @param {number} params.metalness - Metalness value (0-1)
+   * @param {number} params.roughness - Roughness value (0-1)
+   * @param {number} params.transmission - Transmission value (0-1)
+   * @param {number} params.opacity - Opacity value (0-1)
+   * @returns {THREE.MeshStandardMaterial} - PBR material
+   */
+  createPBRMaterial(params = {}) {
+    const color = params.color || '#ffffff';
+    const metalness = params.metalness !== undefined ? params.metalness : 0.5;
+    const roughness = params.roughness !== undefined ? params.roughness : 0.5;
+    const transmission =
+      params.transmission !== undefined ? params.transmission : 0.0;
+    const opacity = params.opacity !== undefined ? params.opacity : 1.0;
+
+    const material = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(color),
+      metalness: Math.max(0, Math.min(1, metalness)),
+      roughness: Math.max(0, Math.min(1, roughness)),
+      transparent: opacity < 1.0 || transmission > 0,
+      opacity: Math.max(0, Math.min(1, opacity)),
+    });
+
+    // Add transmission if supported (Three.js r128+)
+    if (transmission > 0 && material.transmission !== undefined) {
+      material.transmission = Math.max(0, Math.min(1, transmission));
+      material.thickness = params.thickness || 0.5;
+    }
+
+    return material;
+  }
+
+  /**
+   * Create emissive (glowing) material
+   * @param {Object} params - Material parameters
+   * @param {string} params.color - Base color (hex string)
+   * @param {string} params.emissiveColor - Emissive color (hex string)
+   * @param {number} params.emissiveIntensity - Glow intensity (0-1)
+   * @returns {THREE.MeshStandardMaterial} - Emissive material
+   */
+  createEmissiveMaterial(params = {}) {
+    const color = params.color || '#ffffff';
+    const emissiveColor = params.emissiveColor || params.color || '#ffffff';
+    const emissiveIntensity =
+      params.emissiveIntensity !== undefined ? params.emissiveIntensity : 0.5;
+
+    const material = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(color),
+      emissive: new THREE.Color(emissiveColor),
+      emissiveIntensity: Math.max(0, Math.min(2, emissiveIntensity)),
+    });
+
+    return material;
+  }
+
+  /**
+   * Create transparent material for glass/crystal
+   * @param {Object} params - Material parameters
+   * @param {string} params.color - Base color (hex string)
+   * @param {number} params.opacity - Opacity value (0-1)
+   * @param {number} params.transmission - Transmission value (0-1)
+   * @param {number} params.roughness - Roughness value (0-1)
+   * @returns {THREE.MeshPhysicalMaterial} - Transparent material
+   */
+  createTransparentMaterial(params = {}) {
+    const color = params.color || '#ffffff';
+    const opacity = params.opacity !== undefined ? params.opacity : 0.5;
+    const transmission =
+      params.transmission !== undefined ? params.transmission : 0.9;
+    const roughness = params.roughness !== undefined ? params.roughness : 0.1;
+
+    const material = new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color(color),
+      metalness: 0.0,
+      roughness: Math.max(0, Math.min(1, roughness)),
+      transparent: true,
+      opacity: Math.max(0, Math.min(1, opacity)),
+      transmission: Math.max(0, Math.min(1, transmission)),
+      thickness: params.thickness || 0.5,
+      ior: params.ior || 1.5, // Index of refraction
+    });
+
+    return material;
+  }
+
+  /**
+   * Create water material with animated normals
+   * @param {Object} params - Material parameters
+   * @param {string} params.color - Water color (hex string)
+   * @param {number} params.opacity - Opacity value (0-1)
+   * @returns {THREE.ShaderMaterial} - Water material
+   */
+  createWaterMaterial(params = {}) {
+    const color = params.color || '#0077be';
+    const opacity = params.opacity !== undefined ? params.opacity : 0.8;
+
+    const vertexShader = `
+      uniform float time;
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+
+      void main() {
+        vNormal = normalize(normalMatrix * normal);
+        
+        // Animated wave displacement
+        vec3 pos = position;
+        float wave = sin(pos.x * 0.1 + time) * cos(pos.y * 0.1 + time) * 2.0;
+        pos.z += wave;
+        
+        vPosition = pos;
+        
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      }
+    `;
+
+    const fragmentShader = `
+      uniform float time;
+      uniform vec3 waterColor;
+      uniform float opacity;
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+
+      void main() {
+        // Fresnel effect (more reflective at grazing angles)
+        vec3 viewDirection = normalize(cameraPosition - vPosition);
+        float fresnel = pow(1.0 - dot(viewDirection, vNormal), 3.0);
+        
+        // Base water color
+        vec3 color = waterColor;
+        
+        // Add some shimmer
+        float shimmer = sin(vPosition.x * 0.5 + time * 2.0) * cos(vPosition.y * 0.5 + time * 2.0);
+        shimmer = shimmer * 0.1 + 0.9;
+        
+        // Mix with white for highlights
+        color = mix(color, vec3(1.0), fresnel * 0.3);
+        color *= shimmer;
+        
+        gl_FragColor = vec4(color, opacity);
+      }
+    `;
+
+    const material = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms: {
+        time: { value: 0.0 },
+        waterColor: { value: new THREE.Color(color) },
+        opacity: { value: Math.max(0, Math.min(1, opacity)) },
+      },
+      transparent: true,
+      side: THREE.DoubleSide,
+    });
+
+    this.shaderMaterials.add(material);
+    return material;
+  }
+
+  // ============================================================================
+  // TASK 4.4: Shader Uniform Updates
+  // ============================================================================
+
+  /**
+   * Update shader uniforms for all animated materials
+   * @param {number} time - Current time in seconds
+   */
+  updateShaderUniforms(time) {
+    this.shaderMaterials.forEach((material) => {
+      if (material.uniforms && material.uniforms.time) {
+        material.uniforms.time.value = time;
+      }
+    });
+  }
+
+  /**
+   * Update specific material's shader uniforms
+   * @param {THREE.Material} material - Material with shader
+   * @param {number} time - Current time in seconds
+   */
+  updateMaterialUniforms(material, time) {
+    if (material.uniforms && material.uniforms.time) {
+      material.uniforms.time.value = time;
+    }
+  }
+}
+
+
+
+
+        // ========================================================================
+        // AnimationController
+        // ========================================================================
+/**
+ * AnimationController - Object animation and particle system updates
+ * Handles orbit, float, pulse, rotate animations and particle physics
+ */
+
+class AnimationController {
+  constructor() {
+    this.animations = new Map();
+  }
+
+  /**
+   * Register an animation for an object
+   * @param {string} objectId - Object identifier
+   * @param {Object} animationSpec - Animation specification
+   */
+  addAnimation(objectId, animationSpec) {
+    this.animations.set(objectId, animationSpec);
+  }
+
+  /**
+   * Remove animation for an object
+   * @param {string} objectId - Object identifier
+   */
+  removeAnimation(objectId) {
+    this.animations.delete(objectId);
+  }
+
+  /**
+   * Update all animations for current time
+   * @param {number} time - Current time in seconds
+   * @param {Map} renderObjects - Map of object IDs to render objects
+   */
+  update(time, renderObjects) {
+    // Process all registered animations
+    for (const [objectId, animSpec] of this.animations) {
+      const renderObj = renderObjects.get(objectId);
+      if (!renderObj || !renderObj.mesh) continue;
+
+      const mesh = renderObj.mesh;
+      const animType = animSpec.type;
+      const params = {
+        speed: animSpec.speed || 1.0,
+        amplitude: animSpec.amplitude || 1.0,
+        axis: animSpec.axis || 'y',
+        ...animSpec,
+      };
+
+      // Apply animation based on type
+      switch (animType) {
+        case 'orbit':
+          this.applyOrbitAnimation(mesh, time, params);
+          break;
+        case 'float':
+          this.applyFloatAnimation(mesh, time, params);
+          break;
+        case 'pulse':
+          this.applyPulseAnimation(mesh, time, params);
+          break;
+        case 'rotate':
+          this.applyRotateAnimation(mesh, time, params);
+          break;
+        default:
+          console.warn(`Unknown animation type: ${animType}`);
+      }
+    }
+
+    // Update particle systems
+    for (const [objectId, renderObj] of renderObjects) {
+      if (renderObj.type === 'entity' && renderObj.particleSystem) {
+        this.updateParticleSystem(
+          renderObj.particleSystem,
+          time,
+          renderObj.entity
+        );
+      }
+    }
+  }
+
+  /**
+   * Apply orbit animation (circular motion around center)
+   * @param {THREE.Object3D} object - Object to animate
+   * @param {number} time - Current time
+   * @param {Object} params - Animation parameters
+   */
+  applyOrbitAnimation(object, time, params) {
+    const speed = params.speed || 1.0;
+    const radius = params.amplitude || 10.0;
+    const angle = time * speed;
+
+    // Store original position if not already stored
+    if (!object.userData.originalPosition) {
+      object.userData.originalPosition = {
+        x: object.position.x,
+        y: object.position.y,
+        z: object.position.z,
+      };
+    }
+
+    const center = object.userData.originalPosition;
+
+    // Circular motion in XZ plane
+    object.position.x = center.x + Math.cos(angle) * radius;
+    object.position.z = center.z + Math.sin(angle) * radius;
+    object.position.y = center.y;
+  }
+
+  /**
+   * Apply float animation (sine wave vertical movement)
+   * @param {THREE.Object3D} object - Object to animate
+   * @param {number} time - Current time
+   * @param {Object} params - Animation parameters
+   */
+  applyFloatAnimation(object, time, params) {
+    const speed = params.speed || 1.0;
+    const amplitude = params.amplitude || 2.0;
+
+    // Store original position if not already stored
+    if (!object.userData.originalPosition) {
+      object.userData.originalPosition = {
+        x: object.position.x,
+        y: object.position.y,
+        z: object.position.z,
+      };
+    }
+
+    const center = object.userData.originalPosition;
+
+    // Sine wave vertical movement
+    const offset = Math.sin(time * speed) * amplitude;
+    object.position.y = center.y + offset;
+  }
+
+  /**
+   * Apply pulse animation (scale in/out rhythmically)
+   * @param {THREE.Object3D} object - Object to animate
+   * @param {number} time - Current time
+   * @param {Object} params - Animation parameters
+   */
+  applyPulseAnimation(object, time, params) {
+    const speed = params.speed || 1.0;
+    const amplitude = params.amplitude || 0.2;
+
+    // Store original scale if not already stored
+    if (!object.userData.originalScale) {
+      object.userData.originalScale = {
+        x: object.scale.x,
+        y: object.scale.y,
+        z: object.scale.z,
+      };
+    }
+
+    const baseScale = object.userData.originalScale;
+
+    // Rhythmic scale pulsing
+    const scaleFactor = 1.0 + Math.sin(time * speed) * amplitude;
+    object.scale.x = baseScale.x * scaleFactor;
+    object.scale.y = baseScale.y * scaleFactor;
+    object.scale.z = baseScale.z * scaleFactor;
+  }
+
+  /**
+   * Apply rotate animation (spin around own axis)
+   * @param {THREE.Object3D} object - Object to animate
+   * @param {number} time - Current time
+   * @param {Object} params - Animation parameters
+   */
+  applyRotateAnimation(object, time, params) {
+    const speed = params.speed || 1.0;
+    const axis = params.axis || 'y';
+
+    // Continuous rotation around specified axis
+    const angle = time * speed;
+
+    switch (axis) {
+      case 'x':
+        object.rotation.x = angle;
+        break;
+      case 'y':
+        object.rotation.y = angle;
+        break;
+      case 'z':
+        object.rotation.z = angle;
+        break;
+      default:
+        object.rotation.y = angle;
+    }
+  }
+
+  /**
+   * Update particle system positions and physics
+   * @param {THREE.Points} particleSystem - Particle system to update
+   * @param {number} time - Current time
+   * @param {Object} entitySpec - Entity specification with params
+   */
+  updateParticleSystem(particleSystem, time, entitySpec) {
+    if (!particleSystem || !particleSystem.geometry) return;
+
+    const positions = particleSystem.geometry.attributes.position;
+    if (!positions) return;
+
+    const params = entitySpec.params || {};
+    const speed = params.speed || 1.0;
+    const maxDistance = params.maxDistance || 100.0;
+    const gravity = params.gravity || 0.0;
+    const drag = params.drag || 0.0;
+
+    // Initialize velocities if not already done
+    if (!particleSystem.userData.velocities) {
+      particleSystem.userData.velocities = [];
+      for (let i = 0; i < positions.count; i++) {
+        particleSystem.userData.velocities.push({
+          x: (Math.random() - 0.5) * speed,
+          y: (Math.random() - 0.5) * speed,
+          z: (Math.random() - 0.5) * speed,
+        });
+      }
+    }
+
+    // Store origin if not already stored
+    if (!particleSystem.userData.origin) {
+      particleSystem.userData.origin = {
+        x: particleSystem.position.x,
+        y: particleSystem.position.y,
+        z: particleSystem.position.z,
+      };
+    }
+
+    const velocities = particleSystem.userData.velocities;
+    const origin = particleSystem.userData.origin;
+    const deltaTime = 0.016; // Approximate frame time for smooth animation
+
+    // Update each particle
+    for (let i = 0; i < positions.count; i++) {
+      const idx = i * 3;
+
+      // Get current position
+      let x = positions.array[idx];
+      let y = positions.array[idx + 1];
+      let z = positions.array[idx + 2];
+
+      // Apply velocity
+      x += velocities[i].x * deltaTime;
+      y += velocities[i].y * deltaTime;
+      z += velocities[i].z * deltaTime;
+
+      // Apply gravity
+      velocities[i].y -= gravity * deltaTime;
+
+      // Apply drag
+      if (drag > 0) {
+        velocities[i].x *= 1.0 - drag * deltaTime;
+        velocities[i].y *= 1.0 - drag * deltaTime;
+        velocities[i].z *= 1.0 - drag * deltaTime;
+      }
+
+      // Check distance from origin
+      const dx = x - origin.x;
+      const dy = y - origin.y;
+      const dz = z - origin.z;
+      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+      // Reset particle if it exceeds max distance
+      if (distance > maxDistance) {
+        x = origin.x + (Math.random() - 0.5) * 2;
+        y = origin.y + (Math.random() - 0.5) * 2;
+        z = origin.z + (Math.random() - 0.5) * 2;
+
+        // Reset velocity
+        velocities[i].x = (Math.random() - 0.5) * speed;
+        velocities[i].y = (Math.random() - 0.5) * speed;
+        velocities[i].z = (Math.random() - 0.5) * speed;
+      }
+
+      // Update position
+      positions.array[idx] = x;
+      positions.array[idx + 1] = y;
+      positions.array[idx + 2] = z;
+    }
+
+    // Mark positions as needing update
+    positions.needsUpdate = true;
+  }
+
+  /**
+   * Clear all animations
+   */
+  clear() {
+    this.animations.clear();
+  }
+}
+
+
+
+
+        // ========================================================================
+        // CameraController
+        // ========================================================================
+/**
+ * CameraController - Cinematic camera control and shot management
+ * Implements orbital, flythrough, establish, close-up, and pull-back shots
+ */
+
+class CameraController {
+  constructor(camera, scene = null) {
+    this.camera = camera;
+    this.scene = scene;
+    this.shots = [];
+    this.currentShotIndex = -1;
+    this.defaultDistance = 100;
+    this.defaultTarget = { x: 0, y: 0, z: 0 };
+    this.useDefaultOrbital = false;
+
+    // Store initial camera position for reference
+    this.initialPosition = {
+      x: camera.position.x,
+      y: camera.position.y,
+      z: camera.position.z,
+    };
+  }
+
+  /**
+   * Set up camera shot sequence
+   * @param {Array} shots - Array of shot specifications
+   */
+  setupShots(shots) {
+    if (!shots || shots.length === 0) {
+      console.log('No cinematography specified, using default orbital view');
+      this.useDefaultOrbital = true;
+      this.shots = [];
+      this.currentShotIndex = -1;
+      return;
+    }
+
+    this.shots = shots;
+    this.currentShotIndex = -1;
+    this.useDefaultOrbital = false;
+
+    // Sort shots by startTime to ensure proper ordering
+    this.shots.sort((a, b) => (a.startTime || 0) - (b.startTime || 0));
+
+    console.log(`CameraController: ${this.shots.length} shots configured`);
+  }
+
+  /**
+   * Update camera position for current time
+   * @param {number} time - Current time in seconds
+   */
+  update(time) {
+    // If no cinematography specified, use default orbital view
+    if (this.useDefaultOrbital) {
+      this._applyDefaultOrbital(time);
+      return;
+    }
+
+    // If no shots configured, do nothing
+    if (!this.shots || this.shots.length === 0) {
+      return;
+    }
+
+    // Find the current shot based on time
+    const currentShot = this._getCurrentShot(time);
+
+    if (!currentShot) {
+      // No active shot, use default position
+      this._applyDefaultOrbital(time);
+      return;
+    }
+
+    // Calculate local time within the shot
+    const shotStartTime = currentShot.startTime || 0;
+    const shotDuration = currentShot.duration || 10;
+    const localTime = time - shotStartTime;
+    const progress = Math.min(1.0, localTime / shotDuration);
+
+    // Apply the appropriate shot type
+    this._applyShot(currentShot, progress, time);
+  }
+
+  /**
+   * Get the current shot for the given time
+   * @private
+   * @param {number} time - Current time in seconds
+   * @returns {Object|null} Current shot or null
+   */
+  _getCurrentShot(time) {
+    for (let i = 0; i < this.shots.length; i++) {
+      const shot = this.shots[i];
+      const startTime = shot.startTime || 0;
+      const duration = shot.duration || 10;
+      const endTime = startTime + duration;
+
+      if (time >= startTime && time < endTime) {
+        return shot;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Apply the appropriate shot based on type
+   * @private
+   * @param {Object} shot - Shot specification
+   * @param {number} progress - Progress through shot (0-1)
+   * @param {number} time - Current time in seconds
+   */
+  _applyShot(shot, progress, time) {
+    const shotType = shot.type || 'orbital';
+
+    switch (shotType) {
+      case 'orbital':
+        this.applyOrbitalShot(time, shot);
+        break;
+      case 'flythrough':
+        this.applyFlythroughShot(progress, shot);
+        break;
+      case 'establish':
+        this.applyEstablishShot(progress, shot);
+        break;
+      case 'close_up':
+        this.applyCloseUpShot(progress, shot);
+        break;
+      case 'pull_back':
+        this.applyPullBackShot(progress, shot);
+        break;
+      default:
+        console.warn(`Unknown shot type: ${shotType}, using orbital`);
+        this.applyOrbitalShot(time, shot);
+    }
+  }
+
+  /**
+   * Apply default orbital camera movement
+   * @private
+   * @param {number} time - Current time in seconds
+   */
+  _applyDefaultOrbital(time) {
+    const angle = time * 0.2; // Slow rotation
+    const distance = this.defaultDistance;
+
+    this.camera.position.x = Math.cos(angle) * distance;
+    this.camera.position.z = Math.sin(angle) * distance;
+    this.camera.position.y = distance * 0.5;
+
+    this.lookAt(this.defaultTarget);
+  }
+
+  /**
+   * Apply orbital shot (circle around target)
+   * @param {number} time - Current time in seconds
+   * @param {Object} params - Shot parameters
+   */
+  applyOrbitalShot(time, params) {
+    const target = this._resolveTarget(params.target);
+    const distance = params.distance || 50;
+    const speed = params.speed || 1.0;
+    const height = params.height || distance * 0.5;
+
+    // Calculate angle based on time and speed
+    const angle = time * speed * 0.5;
+
+    // Position camera in circular orbit
+    this.camera.position.x = target.x + Math.cos(angle) * distance;
+    this.camera.position.z = target.z + Math.sin(angle) * distance;
+    this.camera.position.y = target.y + height;
+
+    // Look at target
+    this.lookAt(target);
+  }
+
+  /**
+   * Apply flythrough shot (move along path)
+   * @param {number} progress - Progress through shot (0-1)
+   * @param {Object} params - Shot parameters
+   */
+  applyFlythroughShot(progress, params) {
+    const target = this._resolveTarget(params.target);
+
+    // Define path points (can be customized via params.path)
+    const path = params.path || [
+      { x: -100, y: 50, z: -100 },
+      { x: 0, y: 30, z: 0 },
+      { x: 100, y: 50, z: 100 },
+    ];
+
+    // Find current segment based on progress
+    const totalSegments = path.length - 1;
+    const segmentProgress = progress * totalSegments;
+    const segmentIndex = Math.floor(segmentProgress);
+    const localProgress = segmentProgress - segmentIndex;
+
+    // Get start and end points for current segment
+    const startPoint = path[Math.min(segmentIndex, path.length - 1)];
+    const endPoint = path[Math.min(segmentIndex + 1, path.length - 1)];
+
+    // Interpolate position with easing
+    const easedProgress = this._easeInOutCubic(localProgress);
+    const position = this.interpolatePosition(
+      startPoint,
+      endPoint,
+      easedProgress
+    );
+
+    // Set camera position
+    this.camera.position.set(position.x, position.y, position.z);
+
+    // Look at target
+    this.lookAt(target);
+  }
+
+  /**
+   * Apply establish shot (static wide view)
+   * @param {number} progress - Progress through shot (0-1)
+   * @param {Object} params - Shot parameters
+   */
+  applyEstablishShot(progress, params) {
+    const target = this._resolveTarget(params.target);
+    const distance = params.distance || 150;
+    const angle = params.angle || 0.785; // 45 degrees default
+    const height = params.height || distance * 0.6;
+
+    // Static wide angle position
+    this.camera.position.x = target.x + Math.cos(angle) * distance;
+    this.camera.position.z = target.z + Math.sin(angle) * distance;
+    this.camera.position.y = target.y + height;
+
+    // Look at target
+    this.lookAt(target);
+  }
+
+  /**
+   * Apply close-up shot (focus on object)
+   * @param {number} progress - Progress through shot (0-1)
+   * @param {Object} params - Shot parameters
+   */
+  applyCloseUpShot(progress, params) {
+    const target = this._resolveTarget(params.target);
+    const distance = params.distance || 15;
+    const angle = params.angle || 0;
+    const heightOffset = params.heightOffset || 5;
+
+    // Close position near target
+    this.camera.position.x = target.x + Math.cos(angle) * distance;
+    this.camera.position.z = target.z + Math.sin(angle) * distance;
+    this.camera.position.y = target.y + heightOffset;
+
+    // Look at target
+    this.lookAt(target);
+  }
+
+  /**
+   * Apply pull-back shot (zoom out reveal)
+   * @param {number} progress - Progress through shot (0-1)
+   * @param {Object} params - Shot parameters
+   */
+  applyPullBackShot(progress, params) {
+    const target = this._resolveTarget(params.target);
+    const startDistance = params.startDistance || 10;
+    const endDistance = params.endDistance || 100;
+    const angle = params.angle || 0.785;
+
+    // Interpolate distance with easing
+    const easedProgress = this._easeOutCubic(progress);
+    const distance =
+      startDistance + (endDistance - startDistance) * easedProgress;
+    const height = distance * 0.5;
+
+    // Position camera at interpolated distance
+    this.camera.position.x = target.x + Math.cos(angle) * distance;
+    this.camera.position.z = target.z + Math.sin(angle) * distance;
+    this.camera.position.y = target.y + height;
+
+    // Look at target
+    this.lookAt(target);
+  }
+
+  /**
+   * Smoothly interpolate between two positions
+   * @param {Object} start - Start position {x, y, z}
+   * @param {Object} end - End position {x, y, z}
+   * @param {number} t - Interpolation factor (0-1)
+   * @returns {Object} - Interpolated position
+   */
+  interpolatePosition(start, end, t) {
+    // Clamp t to [0, 1]
+    t = Math.max(0, Math.min(1, t));
+
+    return {
+      x: start.x + (end.x - start.x) * t,
+      y: start.y + (end.y - start.y) * t,
+      z: start.z + (end.z - start.z) * t,
+    };
+  }
+
+  /**
+   * Point camera at target
+   * @param {Array|Object} target - Target position [x,y,z] or {x,y,z}
+   */
+  lookAt(target) {
+    const targetPos = this._resolveTarget(target);
+
+    if (this.camera && this.camera.lookAt) {
+      this.camera.lookAt(targetPos.x, targetPos.y, targetPos.z);
+    }
+  }
+
+  /**
+   * Resolve target to a position object
+   * @private
+   * @param {Array|Object|string} target - Target as array, object, or structure ID
+   * @returns {Object} Position {x, y, z}
+   */
+  _resolveTarget(target) {
+    // If no target specified, use default
+    if (!target) {
+      return this.defaultTarget;
+    }
+
+    // If target is an array [x, y, z]
+    if (Array.isArray(target)) {
+      return {
+        x: target[0] || 0,
+        y: target[1] || 0,
+        z: target[2] || 0,
+      };
+    }
+
+    // If target is already an object {x, y, z}
+    if (typeof target === 'object' && target.x !== undefined) {
+      return {
+        x: target.x || 0,
+        y: target.y || 0,
+        z: target.z || 0,
+      };
+    }
+
+    // If target is a structure ID (string), try to find it in the scene
+    if (typeof target === 'string' && this.scene) {
+      const object = this.scene.getObjectByName(target);
+      if (object) {
+        return {
+          x: object.position.x,
+          y: object.position.y,
+          z: object.position.z,
+        };
+      }
+      console.warn(`Target structure "${target}" not found, using default`);
+    }
+
+    // Fallback to default target
+    return this.defaultTarget;
+  }
+
+  /**
+   * Ease-in-out cubic easing function
+   * @private
+   * @param {number} t - Input value (0-1)
+   * @returns {number} Eased value (0-1)
+   */
+  _easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+
+  /**
+   * Ease-out cubic easing function
+   * @private
+   * @param {number} t - Input value (0-1)
+   * @returns {number} Eased value (0-1)
+   */
+  _easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  /**
+   * Ease-in cubic easing function
+   * @private
+   * @param {number} t - Input value (0-1)
+   * @returns {number} Eased value (0-1)
+   */
+  _easeInCubic(t) {
+    return t * t * t;
+  }
+
+  /**
+   * Linear easing (no easing)
+   * @private
+   * @param {number} t - Input value (0-1)
+   * @returns {number} Same value (0-1)
+   */
+  _linear(t) {
+    return t;
+  }
+
+  /**
+   * Apply easing function based on name
+   * @private
+   * @param {number} t - Input value (0-1)
+   * @param {string} easingType - Easing type name
+   * @returns {number} Eased value (0-1)
+   */
+  _applyEasing(t, easingType) {
+    switch (easingType) {
+      case 'ease_in':
+        return this._easeInCubic(t);
+      case 'ease_out':
+        return this._easeOutCubic(t);
+      case 'ease_in_out':
+        return this._easeInOutCubic(t);
+      case 'linear':
+      default:
+        return this._linear(t);
+    }
+  }
+
+  /**
+   * Clear all shots
+   */
+  clear() {
+    this.shots = [];
+    this.currentShotIndex = -1;
+  }
+}
+
+
+
+
+        // ========================================================================
+        // AssetLibrary
+        // ========================================================================
+/**
+ * AssetLibrary - Procedural 3D asset generation
+ * Creates geometry for 50+ structure types and entities
+ */
+
+class AssetLibrary {
+  constructor(scene, options = {}) {
+    this.scene = scene;
+    this.options = options;
+    this.geometryCache = new Map();
+    this.materialCache = new Map();
+  }
+
+  /**
+   * Get quality-specific settings
+   * @private
+   * @param {string} setting - Setting name
+   * @returns {*} Setting value
+   */
+  _getQualitySetting(setting) {
+    const qualitySettings = {
+      draft: {
+        geometrySegments: 8,
+        maxParticles: 1000,
+      },
+      medium: {
+        geometrySegments: 16,
+        maxParticles: 5000,
+      },
+      high: {
+        geometrySegments: 32,
+        maxParticles: 10000,
+      },
+    };
+
+    const quality = this.options.quality || 'medium';
+    return (
+      qualitySettings[quality]?.[setting] ?? qualitySettings.medium[setting]
+    );
+  }
+
+  /**
+   * Create a structure (static 3D object)
+   * @param {Object} structure - Structure specification from dream JSON
+   * @returns {THREE.Mesh|THREE.Group} - Three.js object
+   */
+  createStructure(structure) {
+    const type = structure.type?.toLowerCase() || 'unknown';
+
+    try {
+      let mesh;
+
+      // Dispatcher for structure types
+      switch (type) {
+        // Celestial objects
+        case 'star':
+          mesh = this.createStar(structure);
+          break;
+        case 'planet':
+          mesh = this.createPlanet(structure);
+          break;
+        case 'galaxy':
+          mesh = this.createGalaxy(structure);
+          break;
+        case 'nebula':
+          mesh = this.createNebula(structure);
+          break;
+
+        // Natural elements
+        case 'water':
+        case 'ocean':
+        case 'sea':
+          mesh = this.createWater(structure);
+          break;
+        case 'fire':
+          mesh = this.createFire(structure);
+          break;
+        case 'cloud':
+        case 'clouds':
+          mesh = this.createClouds(structure);
+          break;
+        case 'mountain':
+        case 'mountains':
+          mesh = this.createMountain(structure);
+          break;
+
+        // Living beings
+        case 'horse':
+          mesh = this.createHorse(structure);
+          break;
+        case 'bird':
+          mesh = this.createBird(structure);
+          break;
+        case 'fish':
+          mesh = this.createFish(structure);
+          break;
+        case 'human':
+        case 'person':
+          mesh = this.createHuman(structure);
+          break;
+
+        // Architectural structures
+        case 'tower':
+          mesh = this.createTower(structure);
+          break;
+        case 'bridge':
+          mesh = this.createBridge(structure);
+          break;
+        case 'crystal':
+          mesh = this.createCrystal(structure);
+          break;
+
+        // Fallback for unknown types
+        default:
+          console.warn(
+            `Unknown structure type: ${type}, using generic fallback`
+          );
+          mesh = this.createGenericStructure(structure);
+          break;
+      }
+
+      // Apply transformations
+      if (mesh) {
+        this.applyTransformations(mesh, structure);
+
+        // Apply visual features if specified
+        if (structure.features && structure.features.length > 0) {
+          this.applyFeatures(mesh, structure.features, structure);
+        }
+      }
+
+      return mesh;
+    } catch (error) {
+      console.error(
+        `Error creating structure ${structure.id || 'unknown'}:`,
+        error
+      );
+      return this.createGenericStructure(structure);
+    }
+  }
+
+  /**
+   * Create an entity (dynamic particle system or animated object)
+   * @param {Object} entity - Entity specification from dream JSON
+   * @returns {THREE.Points|THREE.Group} - Three.js object
+   */
+  createEntity(entity) {
+    const type = entity.type?.toLowerCase() || 'unknown';
+
+    try {
+      let object;
+
+      // Dispatcher for entity types
+      switch (type) {
+        case 'particle_stream':
+          object = this.createParticleStream(entity);
+          break;
+        case 'floating_orbs':
+          object = this.createFloatingOrbs(entity);
+          break;
+        case 'light_butterflies':
+          object = this.createLightButterflies(entity);
+          break;
+
+        // Fallback for unknown types
+        default:
+          console.warn(`Unknown entity type: ${type}, using generic fallback`);
+          object = this.createParticleStream(entity);
+          break;
+      }
+
+      return object;
+    } catch (error) {
+      console.error(`Error creating entity ${entity.id || 'unknown'}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Get cached geometry or create new one
+   * @param {string} key - Cache key
+   * @param {Function} createFn - Function to create geometry if not cached
+   * @returns {THREE.BufferGeometry} - Cached or new geometry
+   */
+  getCachedGeometry(key, createFn) {
+    if (!this.geometryCache.has(key)) {
+      this.geometryCache.set(key, createFn());
+    }
+    return this.geometryCache.get(key);
+  }
+
+  /**
+   * Get cached material or create new one
+   * @param {string} key - Cache key
+   * @param {Function} createFn - Function to create material if not cached
+   * @returns {THREE.Material} - Cached or new material
+   */
+  getCachedMaterial(key, createFn) {
+    if (!this.materialCache.has(key)) {
+      this.materialCache.set(key, createFn());
+    }
+    return this.materialCache.get(key);
+  }
+
+  /**
+   * Apply transformations (position, scale, rotation) to a mesh
+   * @param {THREE.Object3D} mesh - The mesh to transform
+   * @param {Object} structure - Structure specification with transform data
+   */
+  applyTransformations(mesh, structure) {
+    // Apply position
+    if (
+      structure.pos &&
+      Array.isArray(structure.pos) &&
+      structure.pos.length === 3
+    ) {
+      mesh.position.set(structure.pos[0], structure.pos[1], structure.pos[2]);
+    }
+
+    // Apply scale
+    if (structure.scale !== undefined) {
+      const scale = structure.scale;
+      mesh.scale.set(scale, scale, scale);
+    }
+
+    // Apply rotation
+    if (
+      structure.rotation &&
+      Array.isArray(structure.rotation) &&
+      structure.rotation.length === 3
+    ) {
+      mesh.rotation.set(
+        structure.rotation[0],
+        structure.rotation[1],
+        structure.rotation[2]
+      );
+    }
+
+    // Enable frustum culling for performance optimization
+    this._enableFrustumCulling(mesh);
+  }
+
+  /**
+   * Enable frustum culling for an object and all its children
+   * @private
+   * @param {THREE.Object3D} object - The object to enable culling for
+   */
+  _enableFrustumCulling(object) {
+    object.frustumCulled = true;
+
+    // Apply to all children recursively
+    if (object.children && object.children.length > 0) {
+      object.children.forEach((child) => this._enableFrustumCulling(child));
+    }
+  }
+
+  // ============================================================================
+  // CELESTIAL OBJECTS
+  // ============================================================================
+
+  /**
+   * Create a star with glowing sphere and corona effects
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Group} - Star with glow effects
+   */
+  createStar(structure) {
+    const group = new THREE.Group();
+    const color = structure.material?.color || '#ffff00';
+    const size = structure.scale || 1;
+
+    // Main star sphere
+    const geometry = this.getCachedGeometry(
+      `sphere_32`,
+      () => new THREE.SphereGeometry(10, 32, 32)
+    );
+
+    const material = this.getCachedMaterial(
+      `star_emissive_${color}`,
+      () =>
+        new THREE.MeshStandardMaterial({
+          color: color,
+          emissive: color,
+          emissiveIntensity: 1.0,
+          metalness: 0,
+          roughness: 0.2,
+        })
+    );
+
+    const star = new THREE.Mesh(geometry, material);
+    star.castShadow = false;
+    group.add(star);
+
+    // Corona glow effect (larger transparent sphere)
+    const coronaGeometry = this.getCachedGeometry(
+      `sphere_16`,
+      () => new THREE.SphereGeometry(15, 16, 16)
+    );
+
+    const coronaMaterial = this.getCachedMaterial(
+      `corona_transparent_${color}`,
+      () =>
+        new THREE.MeshBasicMaterial({
+          color: color,
+          transparent: true,
+          opacity: 0.3,
+          side: THREE.BackSide,
+        })
+    );
+
+    const corona = new THREE.Mesh(coronaGeometry, coronaMaterial);
+    group.add(corona);
+
+    // Point light for illumination
+    const light = new THREE.PointLight(color, 2, 100);
+    group.add(light);
+
+    return group;
+  }
+
+  /**
+   * Create a planet with textured sphere and atmosphere
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Group} - Planet with atmosphere
+   */
+  createPlanet(structure) {
+    const group = new THREE.Group();
+    const color = structure.material?.color || '#4488ff';
+    const size = structure.scale || 1;
+
+    // Main planet sphere
+    const geometry = this.getCachedGeometry(
+      `sphere_32`,
+      () => new THREE.SphereGeometry(10, 32, 32)
+    );
+
+    const material = this.getCachedMaterial(
+      `planet_standard_${color}`,
+      () =>
+        new THREE.MeshStandardMaterial({
+          color: color,
+          metalness: 0.2,
+          roughness: 0.8,
+        })
+    );
+
+    const planet = new THREE.Mesh(geometry, material);
+    planet.castShadow = true;
+    planet.receiveShadow = true;
+    group.add(planet);
+
+    // Atmospheric glow
+    const atmosphereGeometry = this.getCachedGeometry(
+      `sphere_16`,
+      () => new THREE.SphereGeometry(11, 16, 16)
+    );
+
+    const atmosphereMaterial = this.getCachedMaterial(
+      `atmosphere_transparent_${color}`,
+      () =>
+        new THREE.MeshBasicMaterial({
+          color: color,
+          transparent: true,
+          opacity: 0.2,
+          side: THREE.BackSide,
+        })
+    );
+
+    const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
+    group.add(atmosphere);
+
+    return group;
+  }
+
+  /**
+   * Create a galaxy with spiral particle system
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Points} - Galaxy particle system
+   */
+  createGalaxy(structure) {
+    const color = structure.material?.color || '#8844ff';
+    const maxParticles = this._getQualitySetting('maxParticles') || 5000;
+    const particleCount = Math.min(
+      structure.params?.count || 5000,
+      maxParticles
+    );
+
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
+
+    const colorObj = new THREE.Color(color);
+
+    // Create spiral galaxy distribution
+    for (let i = 0; i < particleCount; i++) {
+      const angle = (i / particleCount) * Math.PI * 4; // 2 spiral arms
+      const radius = (i / particleCount) * 50 + Math.random() * 5;
+
+      const x = Math.cos(angle) * radius + (Math.random() - 0.5) * 10;
+      const z = Math.sin(angle) * radius + (Math.random() - 0.5) * 10;
+      const y = (Math.random() - 0.5) * 5; // Vertical spread
+
+      positions[i * 3] = x;
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = z;
+
+      // Vary colors slightly
+      const colorVariation = 0.8 + Math.random() * 0.2;
+      colors[i * 3] = colorObj.r * colorVariation;
+      colors[i * 3 + 1] = colorObj.g * colorVariation;
+      colors[i * 3 + 2] = colorObj.b * colorVariation;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const material = new THREE.PointsMaterial({
+      size: 0.5,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const galaxy = new THREE.Points(geometry, material);
+    return galaxy;
+  }
+
+  /**
+   * Create a nebula with volumetric particle clouds
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Points} - Nebula particle system
+   */
+  createNebula(structure) {
+    const color = structure.material?.color || '#ff44ff';
+    const maxParticles = this._getQualitySetting('maxParticles') || 5000;
+    const particleCount = Math.min(
+      structure.params?.count || 3000,
+      maxParticles
+    );
+
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
+
+    const colorObj = new THREE.Color(color);
+
+    // Create volumetric cloud distribution
+    for (let i = 0; i < particleCount; i++) {
+      // Use multiple overlapping spheres for cloud-like appearance
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.random() * Math.PI;
+      const radius = 20 + Math.random() * 30;
+
+      const x = radius * Math.sin(phi) * Math.cos(theta);
+      const y = radius * Math.sin(phi) * Math.sin(theta);
+      const z = radius * Math.cos(phi);
+
+      positions[i * 3] = x;
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = z;
+
+      // Vary colors for depth
+      const colorVariation = 0.5 + Math.random() * 0.5;
+      colors[i * 3] = colorObj.r * colorVariation;
+      colors[i * 3 + 1] = colorObj.g * colorVariation;
+      colors[i * 3 + 2] = colorObj.b * colorVariation;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const material = new THREE.PointsMaterial({
+      size: 2.0,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.6,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const nebula = new THREE.Points(geometry, material);
+    return nebula;
+  }
+
+  // ============================================================================
+  // NATURAL ELEMENTS
+  // ============================================================================
+
+  /**
+   * Create water surface with animated wave displacement
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Mesh} - Water surface mesh
+   */
+  createWater(structure) {
+    const color = structure.material?.color || '#0088ff';
+    const size = structure.scale || 1;
+
+    // Create plane geometry for water surface
+    const geometry = new THREE.PlaneGeometry(50, 50, 32, 32);
+
+    // Store original positions for wave animation
+    const positions = geometry.attributes.position;
+    const originalPositions = new Float32Array(positions.count * 3);
+    for (let i = 0; i < positions.count; i++) {
+      originalPositions[i * 3] = positions.getX(i);
+      originalPositions[i * 3 + 1] = positions.getY(i);
+      originalPositions[i * 3 + 2] = positions.getZ(i);
+    }
+    geometry.userData.originalPositions = originalPositions;
+
+    const material = this.getCachedMaterial(
+      `water_metallic_${color}`,
+      () =>
+        new THREE.MeshStandardMaterial({
+          color: color,
+          metalness: 0.9,
+          roughness: 0.1,
+          transparent: true,
+          opacity: 0.8,
+          side: THREE.DoubleSide,
+        })
+    );
+
+    const water = new THREE.Mesh(geometry, material);
+    water.rotation.x = -Math.PI / 2; // Horizontal
+    water.receiveShadow = true;
+    water.userData.isWater = true; // Flag for animation system
+
+    return water;
+  }
+
+  /**
+   * Create fire with particle-based flame effects
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Points} - Fire particle system
+   */
+  createFire(structure) {
+    const maxParticles = this._getQualitySetting('maxParticles') || 2000;
+    const particleCount = Math.min(
+      structure.params?.count || 500,
+      maxParticles / 2
+    );
+
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
+    const velocities = new Float32Array(particleCount * 3);
+
+    // Create fire particles
+    for (let i = 0; i < particleCount; i++) {
+      // Start at base
+      const radius = Math.random() * 3;
+      const angle = Math.random() * Math.PI * 2;
+
+      positions[i * 3] = Math.cos(angle) * radius;
+      positions[i * 3 + 1] = Math.random() * 2; // Start low
+      positions[i * 3 + 2] = Math.sin(angle) * radius;
+
+      // Velocity upward with slight randomness
+      velocities[i * 3] = (Math.random() - 0.5) * 0.5;
+      velocities[i * 3 + 1] = 2 + Math.random() * 2; // Upward
+      velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.5;
+
+      // Color gradient from yellow to red
+      const t = Math.random();
+      colors[i * 3] = 1.0; // Red
+      colors[i * 3 + 1] = 0.5 + t * 0.5; // Yellow to orange
+      colors[i * 3 + 2] = 0.0; // No blue
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.userData.velocities = velocities;
+
+    const material = new THREE.PointsMaterial({
+      size: 1.5,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const fire = new THREE.Points(geometry, material);
+    fire.userData.isFire = true; // Flag for animation system
+
+    return fire;
+  }
+
+  /**
+   * Create clouds with volumetric particle formations
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Points} - Cloud particle system
+   */
+  createClouds(structure) {
+    const color = structure.material?.color || '#ffffff';
+    const maxParticles = this._getQualitySetting('maxParticles') || 5000;
+    const particleCount = Math.min(
+      structure.params?.count || 1000,
+      maxParticles
+    );
+
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+
+    const colorObj = new THREE.Color(color);
+
+    // Create fluffy cloud distribution
+    for (let i = 0; i < particleCount; i++) {
+      // Multiple overlapping ellipsoids for cloud shape
+      const x = (Math.random() - 0.5) * 30;
+      const y = (Math.random() - 0.5) * 10;
+      const z = (Math.random() - 0.5) * 20;
+
+      positions[i * 3] = x;
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = z;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    const material = new THREE.PointsMaterial({
+      size: 3.0,
+      color: color,
+      transparent: true,
+      opacity: 0.6,
+      depthWrite: false,
+    });
+
+    const clouds = new THREE.Points(geometry, material);
+    return clouds;
+  }
+
+  /**
+   * Create mountains with cone-based terrain
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Mesh} - Mountain mesh
+   */
+  createMountain(structure) {
+    const color = structure.material?.color || '#8b7355';
+    const size = structure.scale || 1;
+
+    // Create cone for mountain shape
+    const geometry = this.getCachedGeometry(
+      `cone_32`,
+      () => new THREE.ConeGeometry(15, 30, 32)
+    );
+
+    const material = this.getCachedMaterial(
+      `mountain_rough_${color}`,
+      () =>
+        new THREE.MeshStandardMaterial({
+          color: color,
+          metalness: 0.1,
+          roughness: 0.9,
+        })
+    );
+
+    const mountain = new THREE.Mesh(geometry, material);
+    mountain.castShadow = true;
+    mountain.receiveShadow = true;
+
+    return mountain;
+  }
+
+  // ============================================================================
+  // LIVING BEINGS
+  // ============================================================================
+
+  /**
+   * Create a horse with simplified geometric model
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Group} - Horse model
+   */
+  createHorse(structure) {
+    const group = new THREE.Group();
+    const color = structure.material?.color || '#8b4513';
+
+    // Body (horizontal cylinder)
+    const bodyGeometry = this.getCachedGeometry(
+      `cylinder_8`,
+      () => new THREE.CylinderGeometry(4, 5, 12, 8)
+    );
+    const material = new THREE.MeshStandardMaterial({
+      color: color,
+      metalness: 0.1,
+      roughness: 0.8,
+    });
+
+    const body = new THREE.Mesh(bodyGeometry, material);
+    body.rotation.z = Math.PI / 2;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+
+    // Head (cone)
+    const headGeometry = this.getCachedGeometry(
+      `cone_8`,
+      () => new THREE.ConeGeometry(3, 6, 8)
+    );
+    const head = new THREE.Mesh(headGeometry, material);
+    head.position.set(7, 2, 0);
+    head.rotation.z = Math.PI / 2;
+    head.castShadow = true;
+    group.add(head);
+
+    // Neck
+    const neckGeometry = this.getCachedGeometry(
+      `cylinder_6`,
+      () => new THREE.CylinderGeometry(2, 2, 4, 6)
+    );
+    const neck = new THREE.Mesh(neckGeometry, material);
+    neck.position.set(5, 1, 0);
+    neck.rotation.z = Math.PI / 4;
+    neck.castShadow = true;
+    group.add(neck);
+
+    // Legs (4 cylinders)
+    const legGeometry = this.getCachedGeometry(
+      `cylinder_leg`,
+      () => new THREE.CylinderGeometry(1, 1, 8, 6)
+    );
+
+    const legPositions = [
+      [3, -6, 2],
+      [3, -6, -2],
+      [-3, -6, 2],
+      [-3, -6, -2],
+    ];
+
+    legPositions.forEach((pos) => {
+      const leg = new THREE.Mesh(legGeometry, material);
+      leg.position.set(pos[0], pos[1], pos[2]);
+      leg.castShadow = true;
+      group.add(leg);
+    });
+
+    // Tail
+    const tailGeometry = this.getCachedGeometry(
+      `cone_tail`,
+      () => new THREE.ConeGeometry(0.5, 6, 6)
+    );
+    const tail = new THREE.Mesh(tailGeometry, material);
+    tail.position.set(-7, 0, 0);
+    tail.rotation.z = -Math.PI / 4;
+    tail.castShadow = true;
+    group.add(tail);
+
+    return group;
+  }
+
+  /**
+   * Create a bird with basic body and wing geometry
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Group} - Bird model
+   */
+  createBird(structure) {
+    const group = new THREE.Group();
+    const color = structure.material?.color || '#4488ff';
+
+    const material = new THREE.MeshStandardMaterial({
+      color: color,
+      metalness: 0.2,
+      roughness: 0.7,
+    });
+
+    // Body (ellipsoid)
+    const bodyGeometry = this.getCachedGeometry(
+      `sphere_16`,
+      () => new THREE.SphereGeometry(3, 16, 16)
+    );
+    const body = new THREE.Mesh(bodyGeometry, material);
+    body.scale.set(1, 0.8, 1.5);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+
+    // Head (smaller sphere)
+    const headGeometry = this.getCachedGeometry(
+      `sphere_12`,
+      () => new THREE.SphereGeometry(1.5, 12, 12)
+    );
+    const head = new THREE.Mesh(headGeometry, material);
+    head.position.set(0, 1, 3);
+    head.castShadow = true;
+    group.add(head);
+
+    // Beak (cone)
+    const beakGeometry = this.getCachedGeometry(
+      `cone_beak`,
+      () => new THREE.ConeGeometry(0.3, 1, 6)
+    );
+    const beakMaterial = new THREE.MeshStandardMaterial({
+      color: '#ff8800',
+      metalness: 0.3,
+      roughness: 0.6,
+    });
+    const beak = new THREE.Mesh(beakGeometry, beakMaterial);
+    beak.position.set(0, 1, 4.5);
+    beak.rotation.x = Math.PI / 2;
+    group.add(beak);
+
+    // Wings (flat boxes)
+    const wingGeometry = this.getCachedGeometry(
+      `wing_box`,
+      () => new THREE.BoxGeometry(8, 0.5, 4)
+    );
+
+    const leftWing = new THREE.Mesh(wingGeometry, material);
+    leftWing.position.set(-5, 0, 0);
+    leftWing.rotation.z = -Math.PI / 6;
+    leftWing.castShadow = true;
+    group.add(leftWing);
+
+    const rightWing = new THREE.Mesh(wingGeometry, material);
+    rightWing.position.set(5, 0, 0);
+    rightWing.rotation.z = Math.PI / 6;
+    rightWing.castShadow = true;
+    group.add(rightWing);
+
+    return group;
+  }
+
+  /**
+   * Create a fish with streamlined body shape
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Group} - Fish model
+   */
+  createFish(structure) {
+    const group = new THREE.Group();
+    const color = structure.material?.color || '#ff8844';
+
+    const material = new THREE.MeshStandardMaterial({
+      color: color,
+      metalness: 0.6,
+      roughness: 0.3,
+    });
+
+    // Body (stretched sphere)
+    const bodyGeometry = this.getCachedGeometry(
+      `sphere_16`,
+      () => new THREE.SphereGeometry(3, 16, 16)
+    );
+    const body = new THREE.Mesh(bodyGeometry, material);
+    body.scale.set(1, 0.8, 2);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+
+    // Tail fin (triangle)
+    const tailGeometry = this.getCachedGeometry(
+      `cone_tail_fish`,
+      () => new THREE.ConeGeometry(3, 4, 3)
+    );
+    const tail = new THREE.Mesh(tailGeometry, material);
+    tail.position.set(0, 0, -6);
+    tail.rotation.x = Math.PI / 2;
+    tail.castShadow = true;
+    group.add(tail);
+
+    // Side fins
+    const finGeometry = this.getCachedGeometry(
+      `fin_box`,
+      () => new THREE.BoxGeometry(4, 0.2, 2)
+    );
+
+    const leftFin = new THREE.Mesh(finGeometry, material);
+    leftFin.position.set(-3, 0, 1);
+    leftFin.rotation.z = -Math.PI / 4;
+    group.add(leftFin);
+
+    const rightFin = new THREE.Mesh(finGeometry, material);
+    rightFin.position.set(3, 0, 1);
+    rightFin.rotation.z = Math.PI / 4;
+    group.add(rightFin);
+
+    // Top fin
+    const topFin = new THREE.Mesh(finGeometry, material);
+    topFin.position.set(0, 3, 0);
+    topFin.rotation.x = Math.PI / 2;
+    group.add(topFin);
+
+    return group;
+  }
+
+  /**
+   * Create a human with simplified humanoid figure
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Group} - Human model
+   */
+  createHuman(structure) {
+    const group = new THREE.Group();
+    const color = structure.material?.color || '#ffdbac';
+
+    const material = new THREE.MeshStandardMaterial({
+      color: color,
+      metalness: 0.1,
+      roughness: 0.8,
+    });
+
+    // Head (sphere)
+    const headGeometry = this.getCachedGeometry(
+      `sphere_16`,
+      () => new THREE.SphereGeometry(2, 16, 16)
+    );
+    const head = new THREE.Mesh(headGeometry, material);
+    head.position.set(0, 8, 0);
+    head.castShadow = true;
+    group.add(head);
+
+    // Body (box)
+    const bodyGeometry = this.getCachedGeometry(
+      `body_box`,
+      () => new THREE.BoxGeometry(4, 6, 2)
+    );
+    const body = new THREE.Mesh(bodyGeometry, material);
+    body.position.set(0, 3, 0);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+
+    // Arms (cylinders)
+    const armGeometry = this.getCachedGeometry(
+      `arm_cylinder`,
+      () => new THREE.CylinderGeometry(0.6, 0.6, 5, 8)
+    );
+
+    const leftArm = new THREE.Mesh(armGeometry, material);
+    leftArm.position.set(-3, 3, 0);
+    leftArm.castShadow = true;
+    group.add(leftArm);
+
+    const rightArm = new THREE.Mesh(armGeometry, material);
+    rightArm.position.set(3, 3, 0);
+    rightArm.castShadow = true;
+    group.add(rightArm);
+
+    // Legs (cylinders)
+    const legGeometry = this.getCachedGeometry(
+      `leg_cylinder`,
+      () => new THREE.CylinderGeometry(0.8, 0.8, 6, 8)
+    );
+
+    const leftLeg = new THREE.Mesh(legGeometry, material);
+    leftLeg.position.set(-1, -3, 0);
+    leftLeg.castShadow = true;
+    group.add(leftLeg);
+
+    const rightLeg = new THREE.Mesh(legGeometry, material);
+    rightLeg.position.set(1, -3, 0);
+    rightLeg.castShadow = true;
+    group.add(rightLeg);
+
+    return group;
+  }
+
+  // ============================================================================
+  // ARCHITECTURAL STRUCTURES
+  // ============================================================================
+
+  /**
+   * Create a tower with cylindrical base and spire
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Group} - Tower model
+   */
+  createTower(structure) {
+    const group = new THREE.Group();
+    const color = structure.material?.color || '#cccccc';
+
+    const material = new THREE.MeshStandardMaterial({
+      color: color,
+      metalness: 0.2,
+      roughness: 0.8,
+    });
+
+    // Base (cylinder)
+    const baseGeometry = this.getCachedGeometry(
+      `tower_base`,
+      () => new THREE.CylinderGeometry(8, 10, 20, 16)
+    );
+    const base = new THREE.Mesh(baseGeometry, material);
+    base.position.set(0, 10, 0);
+    base.castShadow = true;
+    base.receiveShadow = true;
+    group.add(base);
+
+    // Middle section (narrower cylinder)
+    const middleGeometry = this.getCachedGeometry(
+      `tower_middle`,
+      () => new THREE.CylinderGeometry(6, 8, 15, 16)
+    );
+    const middle = new THREE.Mesh(middleGeometry, material);
+    middle.position.set(0, 27.5, 0);
+    middle.castShadow = true;
+    group.add(middle);
+
+    // Spire (cone)
+    const spireGeometry = this.getCachedGeometry(
+      `tower_spire`,
+      () => new THREE.ConeGeometry(6, 12, 16)
+    );
+    const spire = new THREE.Mesh(spireGeometry, material);
+    spire.position.set(0, 41, 0);
+    spire.castShadow = true;
+    group.add(spire);
+
+    return group;
+  }
+
+  /**
+   * Create a bridge with spanning structure
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Group} - Bridge model
+   */
+  createBridge(structure) {
+    const group = new THREE.Group();
+    const color = structure.material?.color || '#8b7355';
+
+    const material = new THREE.MeshStandardMaterial({
+      color: color,
+      metalness: 0.3,
+      roughness: 0.7,
+    });
+
+    // Main deck (long box)
+    const deckGeometry = this.getCachedGeometry(
+      `bridge_deck`,
+      () => new THREE.BoxGeometry(40, 2, 8)
+    );
+    const deck = new THREE.Mesh(deckGeometry, material);
+    deck.position.set(0, 0, 0);
+    deck.castShadow = true;
+    deck.receiveShadow = true;
+    group.add(deck);
+
+    // Support pillars
+    const pillarGeometry = this.getCachedGeometry(
+      `bridge_pillar`,
+      () => new THREE.CylinderGeometry(2, 2, 15, 8)
+    );
+
+    const pillarPositions = [
+      [-15, -8.5, 0],
+      [0, -8.5, 0],
+      [15, -8.5, 0],
+    ];
+
+    pillarPositions.forEach((pos) => {
+      const pillar = new THREE.Mesh(pillarGeometry, material);
+      pillar.position.set(pos[0], pos[1], pos[2]);
+      pillar.castShadow = true;
+      group.add(pillar);
+    });
+
+    // Railings (thin boxes)
+    const railingGeometry = this.getCachedGeometry(
+      `bridge_railing`,
+      () => new THREE.BoxGeometry(40, 2, 0.5)
+    );
+
+    const leftRailing = new THREE.Mesh(railingGeometry, material);
+    leftRailing.position.set(0, 2, 4);
+    group.add(leftRailing);
+
+    const rightRailing = new THREE.Mesh(railingGeometry, material);
+    rightRailing.position.set(0, 2, -4);
+    group.add(rightRailing);
+
+    return group;
+  }
+
+  /**
+   * Create a crystal with transparent geometric form
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Mesh} - Crystal mesh
+   */
+  createCrystal(structure) {
+    const color = structure.material?.color || '#88ffff';
+
+    // Create octahedron for crystal shape
+    const geometry = this.getCachedGeometry(
+      `crystal_octahedron`,
+      () => new THREE.OctahedronGeometry(8, 0)
+    );
+
+    const material = new THREE.MeshPhysicalMaterial({
+      color: color,
+      metalness: 0.1,
+      roughness: 0.1,
+      transparent: true,
+      opacity: 0.7,
+      transmission: 0.9,
+      thickness: 0.5,
+    });
+
+    const crystal = new THREE.Mesh(geometry, material);
+    crystal.castShadow = true;
+    crystal.receiveShadow = true;
+
+    return crystal;
+  }
+
+  /**
+   * Create a generic fallback structure for unknown types
+   * @param {Object} structure - Structure specification
+   * @returns {THREE.Mesh} - Generic box mesh
+   */
+  createGenericStructure(structure) {
+    const geometry = this.getCachedGeometry(
+      'generic_box',
+      () => new THREE.BoxGeometry(10, 10, 10)
+    );
+
+    const color = structure.material?.color || '#888888';
+    const material = this.getCachedMaterial(
+      `generic_standard_${color}`,
+      () =>
+        new THREE.MeshStandardMaterial({
+          color: color,
+          metalness: 0.3,
+          roughness: 0.7,
+        })
+    );
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    return mesh;
+  }
+
+  // ============================================================================
+  // PARTICLE ENTITY SYSTEMS
+  // ============================================================================
+
+  /**
+   * Create a particle stream with velocity-based movement
+   * @param {Object} entity - Entity specification
+   * @returns {THREE.Points} - Particle stream
+   */
+  createParticleStream(entity) {
+    const maxParticles = this._getQualitySetting('maxParticles') || 5000;
+    const count = Math.min(entity.count || 1000, maxParticles);
+    const params = entity.params || {};
+    const color = params.color || '#00ffff';
+    const speed = params.speed || 1.0;
+    const size = params.size || 1.0;
+
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const velocities = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+
+    const colorObj = new THREE.Color(color);
+
+    for (let i = 0; i < count; i++) {
+      // Random starting positions in a volume
+      positions[i * 3] = (Math.random() - 0.5) * 20;
+      positions[i * 3 + 1] = (Math.random() - 0.5) * 20;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 20;
+
+      // Random velocities
+      velocities[i * 3] = (Math.random() - 0.5) * speed;
+      velocities[i * 3 + 1] = (Math.random() - 0.5) * speed;
+      velocities[i * 3 + 2] = (Math.random() - 0.5) * speed;
+
+      // Colors with slight variation
+      const variation = 0.8 + Math.random() * 0.2;
+      colors[i * 3] = colorObj.r * variation;
+      colors[i * 3 + 1] = colorObj.g * variation;
+      colors[i * 3 + 2] = colorObj.b * variation;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.userData.velocities = velocities;
+    geometry.userData.maxDistance = 50;
+
+    const material = new THREE.PointsMaterial({
+      size: size,
+      vertexColors: true,
+      transparent: true,
+      opacity: params.glow ? 0.9 : 0.7,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const particles = new THREE.Points(geometry, material);
+    particles.userData.isParticleStream = true;
+    particles.userData.params = params;
+
+    return particles;
+  }
+
+  /**
+   * Create floating orbs with glowing spheres
+   * @param {Object} entity - Entity specification
+   * @returns {THREE.Group} - Group of floating orbs
+   */
+  createFloatingOrbs(entity) {
+    const group = new THREE.Group();
+    const maxOrbs = Math.floor(
+      (this._getQualitySetting('maxParticles') || 5000) / 100
+    );
+    const count = Math.min(entity.count || 10, maxOrbs);
+    const params = entity.params || {};
+    const color = params.color || '#ffff00';
+    const size = params.size || 1.0;
+    const glow = params.glow || 0.5;
+
+    for (let i = 0; i < count; i++) {
+      // Create orb geometry
+      const geometry = this.getCachedGeometry(
+        `orb_sphere`,
+        () => new THREE.SphereGeometry(1, 16, 16)
+      );
+
+      const material = new THREE.MeshStandardMaterial({
+        color: color,
+        emissive: color,
+        emissiveIntensity: glow,
+        metalness: 0,
+        roughness: 0.2,
+      });
+
+      const orb = new THREE.Mesh(geometry, material);
+
+      // Random position
+      orb.position.set(
+        (Math.random() - 0.5) * 30,
+        (Math.random() - 0.5) * 30,
+        (Math.random() - 0.5) * 30
+      );
+
+      // Scale based on size parameter
+      orb.scale.setScalar(size);
+
+      // Store animation data
+      orb.userData.floatOffset = Math.random() * Math.PI * 2;
+      orb.userData.floatSpeed = 0.5 + Math.random() * 0.5;
+      orb.userData.floatAmplitude = 2 + Math.random() * 2;
+
+      group.add(orb);
+    }
+
+    group.userData.isFloatingOrbs = true;
+    return group;
+  }
+
+  /**
+   * Create light butterflies with animated particles
+   * @param {Object} entity - Entity specification
+   * @returns {THREE.Points} - Butterfly particle system
+   */
+  createLightButterflies(entity) {
+    const maxParticles = this._getQualitySetting('maxParticles') || 5000;
+    const count = Math.min(entity.count || 50, Math.floor(maxParticles / 25));
+    const params = entity.params || {};
+    const color = params.color || '#ffaaff';
+    const speed = params.speed || 1.0;
+    const size = params.size || 1.5;
+
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const velocities = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+
+    const colorObj = new THREE.Color(color);
+
+    for (let i = 0; i < count; i++) {
+      // Random starting positions
+      positions[i * 3] = (Math.random() - 0.5) * 40;
+      positions[i * 3 + 1] = (Math.random() - 0.5) * 40;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 40;
+
+      // Fluttering velocities (more erratic)
+      velocities[i * 3] = (Math.random() - 0.5) * speed * 2;
+      velocities[i * 3 + 1] = (Math.random() - 0.5) * speed * 2;
+      velocities[i * 3 + 2] = (Math.random() - 0.5) * speed * 2;
+
+      // Bright colors
+      colors[i * 3] = colorObj.r;
+      colors[i * 3 + 1] = colorObj.g;
+      colors[i * 3 + 2] = colorObj.b;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.userData.velocities = velocities;
+    geometry.userData.maxDistance = 60;
+    geometry.userData.flutterSpeed = speed;
+
+    const material = new THREE.PointsMaterial({
+      size: size,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const butterflies = new THREE.Points(geometry, material);
+    butterflies.userData.isLightButterflies = true;
+    butterflies.userData.params = params;
+
+    return butterflies;
+  }
+
+  /**
+   * Update particle system (called by AnimationController)
+   * @param {THREE.Points} particles - Particle system to update
+   * @param {number} deltaTime - Time since last update
+   */
+  updateParticleSystem(particles, deltaTime) {
+    if (!particles.geometry.attributes.position) return;
+
+    const positions = particles.geometry.attributes.position.array;
+    const velocities = particles.geometry.userData.velocities;
+    const maxDistance = particles.geometry.userData.maxDistance || 50;
+
+    if (!velocities) return;
+
+    for (let i = 0; i < positions.length; i += 3) {
+      // Update position based on velocity
+      positions[i] += velocities[i] * deltaTime;
+      positions[i + 1] += velocities[i + 1] * deltaTime;
+      positions[i + 2] += velocities[i + 2] * deltaTime;
+
+      // Reset particles that go too far
+      const distance = Math.sqrt(
+        positions[i] ** 2 + positions[i + 1] ** 2 + positions[i + 2] ** 2
+      );
+
+      if (distance > maxDistance) {
+        positions[i] = (Math.random() - 0.5) * 10;
+        positions[i + 1] = (Math.random() - 0.5) * 10;
+        positions[i + 2] = (Math.random() - 0.5) * 10;
+      }
+    }
+
+    particles.geometry.attributes.position.needsUpdate = true;
+  }
+
+  // ============================================================================
+  // VISUAL FEATURES
+  // ============================================================================
+
+  /**
+   * Apply visual features to a mesh
+   * @param {THREE.Object3D} mesh - The mesh to apply features to
+   * @param {Array<string>} features - Array of feature names
+   * @param {Object} structure - Original structure specification
+   */
+  applyFeatures(mesh, features, structure) {
+    if (!features || features.length === 0) return;
+
+    features.forEach((feature) => {
+      const featureName = feature.toLowerCase();
+
+      switch (featureName) {
+        case 'glowing_edges':
+          this.applyGlowingEdges(mesh, structure);
+          break;
+        case 'emissive':
+          this.applyEmissive(mesh, structure);
+          break;
+        case 'particle_trail':
+          this.applyParticleTrail(mesh, structure);
+          break;
+        case 'rotating':
+        case 'animated':
+          this.applyAutoRotation(mesh, structure);
+          break;
+        case 'pulsating':
+          this.applyPulsating(mesh, structure);
+          break;
+        default:
+          console.warn(`Unknown feature: ${feature}`);
+      }
+    });
+  }
+
+  /**
+   * Apply glowing edges effect with rim lighting
+   * @param {THREE.Object3D} mesh - The mesh to modify
+   * @param {Object} structure - Structure specification
+   */
+  applyGlowingEdges(mesh, structure) {
+    const color = structure.material?.color || '#ffffff';
+
+    // Traverse all meshes in the object
+    mesh.traverse((child) => {
+      if (child.isMesh && child.material) {
+        // Add emissive properties for glow effect
+        if (child.material.emissive) {
+          child.material.emissive = new THREE.Color(color);
+          child.material.emissiveIntensity = 0.3;
+        }
+      }
+    });
+
+    // Store feature flag for potential shader effects
+    mesh.userData.hasGlowingEdges = true;
+  }
+
+  /**
+   * Apply emissive effect with material properties
+   * @param {THREE.Object3D} mesh - The mesh to modify
+   * @param {Object} structure - Structure specification
+   */
+  applyEmissive(mesh, structure) {
+    const color = structure.material?.color || '#ffffff';
+    const intensity = structure.material?.emissiveIntensity || 0.8;
+
+    mesh.traverse((child) => {
+      if (child.isMesh && child.material) {
+        if (child.material.emissive) {
+          child.material.emissive = new THREE.Color(color);
+          child.material.emissiveIntensity = intensity;
+        }
+      }
+    });
+
+    mesh.userData.isEmissive = true;
+  }
+
+  /**
+   * Apply particle trail generation
+   * @param {THREE.Object3D} mesh - The mesh to add trail to
+   * @param {Object} structure - Structure specification
+   */
+  applyParticleTrail(mesh, structure) {
+    const color = structure.material?.color || '#ffffff';
+    const trailLength = 50;
+
+    // Create trail particle system
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(trailLength * 3);
+    const colors = new Float32Array(trailLength * 3);
+
+    const colorObj = new THREE.Color(color);
+
+    // Initialize trail positions at mesh position
+    for (let i = 0; i < trailLength; i++) {
+      positions[i * 3] = mesh.position.x;
+      positions[i * 3 + 1] = mesh.position.y;
+      positions[i * 3 + 2] = mesh.position.z;
+
+      // Fade out along trail
+      const alpha = 1 - i / trailLength;
+      colors[i * 3] = colorObj.r * alpha;
+      colors[i * 3 + 1] = colorObj.g * alpha;
+      colors[i * 3 + 2] = colorObj.b * alpha;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const material = new THREE.PointsMaterial({
+      size: 1.0,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.6,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const trail = new THREE.Points(geometry, material);
+    trail.userData.isTrail = true;
+    trail.userData.trailIndex = 0;
+    trail.userData.parentMesh = mesh;
+
+    // Add trail as child
+    mesh.add(trail);
+    mesh.userData.hasParticleTrail = true;
+  }
+
+  /**
+   * Apply automatic rotation animation
+   * @param {THREE.Object3D} mesh - The mesh to rotate
+   * @param {Object} structure - Structure specification
+   */
+  applyAutoRotation(mesh, structure) {
+    // Store rotation parameters for AnimationController
+    mesh.userData.autoRotate = true;
+    mesh.userData.rotationSpeed = structure.animation?.speed || 1.0;
+    mesh.userData.rotationAxis = structure.animation?.axis || 'y';
+  }
+
+  /**
+   * Apply pulsating animation
+   * @param {THREE.Object3D} mesh - The mesh to pulsate
+   * @param {Object} structure - Structure specification
+   */
+  applyPulsating(mesh, structure) {
+    // Store pulsating parameters for AnimationController
+    mesh.userData.pulsating = true;
+    mesh.userData.pulseSpeed = structure.animation?.speed || 1.0;
+    mesh.userData.pulseAmplitude = structure.animation?.amplitude || 0.2;
+  }
+
+  /**
+   * Dispose all cached geometries and materials
+   */
+  dispose() {
+    this.geometryCache.forEach((geometry) => geometry.dispose());
+    this.geometryCache.clear();
+
+    this.materialCache.forEach((material) => material.dispose());
+    this.materialCache.clear();
+  }
+}
+
+
+
+
+        // ========================================================================
+        // StructureRenderer
+        // ========================================================================
+/**
+ * StructureRenderer - Handles rendering of static and animated structures
+ * Supports various structure types and motion/animation definitions
+ */
+
+class StructureRenderer {
+  constructor(scene, assetLibrary, materialSystem, options = {}) {
+    this.scene = scene;
+    this.assetLibrary = assetLibrary;
+    this.materialSystem = materialSystem;
+    this.options = options;
+    this.structures = new Map(); // id -> structure object
+  }
+
+  /**
+   * Create structures from dream data
+   * @param {Array} structuresData - Array of structure specifications
+   */
+  createStructures(structuresData) {
+    console.log(`Creating ${structuresData.length} structures...`);
+
+    structuresData.forEach((structureSpec) => {
+      try {
+        const structure = this._createStructure(structureSpec);
+        if (structure) {
+          this.structures.set(structureSpec.id, {
+            spec: structureSpec,
+            object: structure,
+            initialScale: structureSpec.scale || 1.0,
+            initialPosition: structureSpec.pos || [0, 0, 0],
+          });
+          this.scene.add(structure);
+        }
+      } catch (error) {
+        console.error(`Failed to create structure ${structureSpec.id}:`, error);
+      }
+    });
+
+    console.log(`Created ${this.structures.size} structures`);
+  }
+
+  /**
+   * Create a single structure based on type
+   * @private
+   */
+  _createStructure(spec) {
+    const type = (spec.type || spec.template || 'generic').toLowerCase();
+    const pos = spec.pos || [0, 0, 0];
+    const scale = spec.scale || 1.0;
+    const rotation = spec.rotation || [0, 0, 0];
+
+    // Create structure based on type
+    let structure;
+    switch (type) {
+      case 'star':
+        structure = this._createStar(spec);
+        break;
+      case 'planet':
+        structure = this._createPlanet(spec);
+        break;
+      case 'ship':
+      case 'titanic_ship':
+        structure = this._createShip(spec);
+        break;
+      case 'volcano':
+        structure = this._createVolcano(spec);
+        break;
+      case 'library':
+      case 'floating_library':
+        structure = this._createLibrary(spec);
+        break;
+      case 'organic_house':
+      case 'house':
+      case 'twisted_house':
+        structure = this._createHouse(spec);
+        break;
+      case 'crystal':
+      case 'crystal_tower':
+      case 'crystal_spire':
+        structure = this._createCrystal(spec);
+        break;
+      case 'tree':
+      case 'organic_tree':
+      case 'data_tree':
+        structure = this._createTree(spec);
+        break;
+      case 'energy_nexus':
+      case 'portal_arch':
+        structure = this._createEnergyStructure(spec);
+        break;
+      case 'floating_platform':
+      case 'floating_island':
+        structure = this._createPlatform(spec);
+        break;
+      case 'galaxy':
+        structure = this._createGalaxy(spec);
+        break;
+      default:
+        structure = this._createGenericStructure(spec);
+        break;
+    }
+
+    if (!structure) return null;
+
+    // Set position, scale, and rotation
+    structure.position.set(pos[0], pos[1], pos[2]);
+    structure.scale.setScalar(scale);
+    structure.rotation.set(rotation[0], rotation[1], rotation[2]);
+    structure.name = spec.id;
+
+    return structure;
+  }
+
+  /**
+   * Create star structure
+   * @private
+   */
+  _createStar(spec) {
+    const scale = spec.scale || 6.0;
+    const material = spec.material || {};
+
+    const geometry = new THREE.SphereGeometry(scale, 32, 32);
+    const mat = new THREE.MeshBasicMaterial({
+      color: material.color || '#FFD700',
+      emissive: material.color || '#FFD700',
+      emissiveIntensity: material.emissiveIntensity || 2.0,
+    });
+
+    const star = new THREE.Mesh(geometry, mat);
+
+    // Add point light for glow effect
+    const light = new THREE.PointLight(
+      material.color || '#FFD700',
+      material.emissiveIntensity || 2.0,
+      scale * 20
+    );
+    star.add(light);
+
+    return star;
+  }
+
+  /**
+   * Create planet structure
+   * @private
+   */
+  _createPlanet(spec) {
+    const scale = spec.scale || 4.0;
+    const material = spec.material || {};
+
+    const geometry = new THREE.SphereGeometry(scale, 32, 32);
+    const mat = new THREE.MeshStandardMaterial({
+      color: material.color || '#4488FF',
+      metalness: material.metalness || 0.3,
+      roughness: material.roughness || 0.7,
+    });
+
+    const planet = new THREE.Mesh(geometry, mat);
+    planet.castShadow = true;
+    planet.receiveShadow = true;
+
+    return planet;
+  }
+
+  /**
+   * Create ship structure
+   * @private
+   */
+  _createShip(spec) {
+    const scale = spec.scale || 2.0;
+    const material = spec.material || {};
+
+    // Create ship hull (elongated box)
+    const hullGeometry = new THREE.BoxGeometry(scale * 4, scale, scale * 1.5);
+    const hullMaterial = new THREE.MeshStandardMaterial({
+      color: material.color || '#8B4513',
+      metalness: material.metalness || 0.6,
+      roughness: material.roughness || 0.4,
+    });
+
+    const hull = new THREE.Mesh(hullGeometry, hullMaterial);
+    hull.castShadow = true;
+    hull.receiveShadow = true;
+
+    // Create ship group
+    const ship = new THREE.Group();
+    ship.add(hull);
+
+    // Add masts (simple cylinders)
+    const mastGeometry = new THREE.CylinderGeometry(
+      0.1 * scale,
+      0.1 * scale,
+      scale * 3,
+      8
+    );
+    const mastMaterial = new THREE.MeshStandardMaterial({ color: '#654321' });
+
+    const mast1 = new THREE.Mesh(mastGeometry, mastMaterial);
+    mast1.position.set(-scale, scale * 1.5, 0);
+    ship.add(mast1);
+
+    const mast2 = new THREE.Mesh(mastGeometry, mastMaterial);
+    mast2.position.set(scale, scale * 1.5, 0);
+    ship.add(mast2);
+
+    return ship;
+  }
+
+  /**
+   * Create volcano structure
+   * @private
+   */
+  _createVolcano(spec) {
+    const scale = spec.scale || 3.0;
+    const material = spec.material || {};
+
+    // Create cone for volcano
+    const geometry = new THREE.ConeGeometry(scale * 2, scale * 3, 32);
+    const mat = new THREE.MeshStandardMaterial({
+      color: material.color || '#3A3A3A',
+      roughness: material.roughness || 0.9,
+      metalness: 0.1,
+    });
+
+    const volcano = new THREE.Mesh(geometry, mat);
+    volcano.castShadow = true;
+    volcano.receiveShadow = true;
+
+    // Add glow at top if emissive
+    if (material.emissive) {
+      const glowGeometry = new THREE.CylinderGeometry(
+        scale * 0.5,
+        scale * 0.8,
+        scale * 0.5,
+        16
+      );
+      const glowMaterial = new THREE.MeshBasicMaterial({
+        color: '#FF4500',
+        emissive: '#FF4500',
+        emissiveIntensity: 1.5,
+      });
+      const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+      glow.position.y = scale * 1.5;
+      volcano.add(glow);
+    }
+
+    return volcano;
+  }
+
+  /**
+   * Create library structure
+   * @private
+   */
+  _createLibrary(spec) {
+    const scale = spec.scale || 1.2;
+    const material = spec.material || {};
+
+    // Create main building
+    const buildingGeometry = new THREE.BoxGeometry(
+      scale * 8,
+      scale * 6,
+      scale * 6
+    );
+    const buildingMaterial = new THREE.MeshStandardMaterial({
+      color: material.color || '#D4AF37',
+      transparent: material.opacity !== undefined,
+      opacity: material.opacity || 1.0,
+      metalness: 0.3,
+      roughness: 0.6,
+    });
+
+    const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+    building.castShadow = true;
+    building.receiveShadow = true;
+
+    // Create library group
+    const library = new THREE.Group();
+    library.add(building);
+
+    // Add columns
+    const columnGeometry = new THREE.CylinderGeometry(
+      scale * 0.3,
+      scale * 0.3,
+      scale * 6,
+      8
+    );
+    const columnMaterial = new THREE.MeshStandardMaterial({ color: '#F5F5DC' });
+
+    for (let i = -1; i <= 1; i++) {
+      const column = new THREE.Mesh(columnGeometry, columnMaterial);
+      column.position.set(i * scale * 3, 0, scale * 3);
+      library.add(column);
+    }
+
+    // Add emissive glow if specified
+    if (material.emissive) {
+      buildingMaterial.emissive = new THREE.Color(material.emissive);
+      buildingMaterial.emissiveIntensity = material.emissiveIntensity || 0.4;
+    }
+
+    return library;
+  }
+
+  /**
+   * Create house structure
+   * @private
+   */
+  _createHouse(spec) {
+    const scale = spec.scale || 1.0;
+    const material = spec.material || {};
+
+    // Create house base
+    const baseGeometry = new THREE.BoxGeometry(scale * 4, scale * 3, scale * 4);
+    const baseMaterial = new THREE.MeshStandardMaterial({
+      color: material.color || '#8B7355',
+      roughness: material.roughness || 0.7,
+      metalness: material.metalness || 0.1,
+    });
+
+    const base = new THREE.Mesh(baseGeometry, baseMaterial);
+    base.castShadow = true;
+    base.receiveShadow = true;
+
+    // Create roof
+    const roofGeometry = new THREE.ConeGeometry(scale * 3, scale * 2, 4);
+    const roofMaterial = new THREE.MeshStandardMaterial({ color: '#654321' });
+    const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+    roof.position.y = scale * 2.5;
+    roof.rotation.y = Math.PI / 4;
+
+    // Create house group
+    const house = new THREE.Group();
+    house.add(base);
+    house.add(roof);
+
+    return house;
+  }
+
+  /**
+   * Create crystal structure
+   * @private
+   */
+  _createCrystal(spec) {
+    const scale = spec.scale || 3.0;
+    const material = spec.material || {};
+
+    // Create crystal geometry (octahedron)
+    const geometry = new THREE.OctahedronGeometry(scale, 0);
+    const mat = new THREE.MeshPhysicalMaterial({
+      color: material.color || '#FF00FF',
+      transparent: true,
+      opacity: material.opacity || 0.7,
+      transmission: material.transmission || 0.9,
+      roughness: 0.1,
+      metalness: 0.1,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.1,
+    });
+
+    const crystal = new THREE.Mesh(geometry, mat);
+
+    // Add emissive glow
+    if (material.emissive || spec.features?.includes('glowing_edges')) {
+      mat.emissive = new THREE.Color(material.color || '#FF00FF');
+      mat.emissiveIntensity = 0.5;
+    }
+
+    return crystal;
+  }
+
+  /**
+   * Create tree structure
+   * @private
+   */
+  _createTree(spec) {
+    const scale = spec.scale || 3.0;
+
+    // Create trunk
+    const trunkGeometry = new THREE.CylinderGeometry(
+      scale * 0.3,
+      scale * 0.5,
+      scale * 4,
+      8
+    );
+    const trunkMaterial = new THREE.MeshStandardMaterial({ color: '#654321' });
+    const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+    trunk.castShadow = true;
+
+    // Create foliage
+    const foliageGeometry = new THREE.SphereGeometry(scale * 2, 16, 16);
+    const foliageMaterial = new THREE.MeshStandardMaterial({
+      color: '#228B22',
+    });
+    const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
+    foliage.position.y = scale * 3;
+    foliage.castShadow = true;
+
+    // Create tree group
+    const tree = new THREE.Group();
+    tree.add(trunk);
+    tree.add(foliage);
+
+    return tree;
+  }
+
+  /**
+   * Create energy structure (nexus, portal, etc.)
+   * @private
+   */
+  _createEnergyStructure(spec) {
+    const scale = spec.scale || 4.0;
+    const material = spec.material || {};
+
+    // Create torus for portal/nexus
+    const geometry = new THREE.TorusGeometry(scale, scale * 0.3, 16, 32);
+    const mat = new THREE.MeshBasicMaterial({
+      color: material.color || '#00FFFF',
+      emissive: material.color || '#00FFFF',
+      emissiveIntensity: 1.5,
+      transparent: true,
+      opacity: 0.8,
+    });
+
+    const structure = new THREE.Mesh(geometry, mat);
+
+    // Add point light
+    const light = new THREE.PointLight(
+      material.color || '#00FFFF',
+      2,
+      scale * 10
+    );
+    structure.add(light);
+
+    return structure;
+  }
+
+  /**
+   * Create platform structure
+   * @private
+   */
+  _createPlatform(spec) {
+    const scale = spec.scale || 2.0;
+    const material = spec.material || {};
+
+    // Create flat cylinder for platform
+    const geometry = new THREE.CylinderGeometry(
+      scale * 2,
+      scale * 2,
+      scale * 0.2,
+      32
+    );
+    const mat = new THREE.MeshStandardMaterial({
+      color: material.color || '#D4AF37',
+      transparent: spec.features?.includes('transparent'),
+      opacity: spec.features?.includes('transparent') ? 0.5 : 1.0,
+      metalness: 0.5,
+      roughness: 0.3,
+    });
+
+    const platform = new THREE.Mesh(geometry, mat);
+    platform.castShadow = true;
+    platform.receiveShadow = true;
+
+    return platform;
+  }
+
+  /**
+   * Create galaxy structure
+   * @private
+   */
+  _createGalaxy(spec) {
+    const scale = spec.scale || 10.0;
+
+    // Create spiral galaxy using particles
+    const particleCount = 5000;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
+
+    for (let i = 0; i < particleCount; i++) {
+      const angle = (i / particleCount) * Math.PI * 4;
+      const radius = (i / particleCount) * scale;
+      const height = (Math.random() - 0.5) * scale * 0.2;
+
+      positions[i * 3] = Math.cos(angle) * radius;
+      positions[i * 3 + 1] = height;
+      positions[i * 3 + 2] = Math.sin(angle) * radius;
+
+      // Color gradient from center to edge
+      const colorMix = i / particleCount;
+      colors[i * 3] = 0.5 + colorMix * 0.5; // R
+      colors[i * 3 + 1] = 0.3 + colorMix * 0.3; // G
+      colors[i * 3 + 2] = 1.0; // B
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const material = new THREE.PointsMaterial({
+      size: 0.5,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+    });
+
+    const galaxy = new THREE.Points(geometry, material);
+    return galaxy;
+  }
+
+  /**
+   * Create generic structure
+   * @private
+   */
+  _createGenericStructure(spec) {
+    const scale = spec.scale || 1.0;
+    const material = spec.material || {};
+
+    const geometry = new THREE.BoxGeometry(scale * 2, scale * 2, scale * 2);
+    const mat = new THREE.MeshStandardMaterial({
+      color: material.color || '#888888',
+      metalness: material.metalness || 0.5,
+      roughness: material.roughness || 0.5,
+    });
+
+    const structure = new THREE.Mesh(geometry, mat);
+    structure.castShadow = true;
+    structure.receiveShadow = true;
+
+    return structure;
+  }
+
+  /**
+   * Update structures based on motion and animation
+   * @param {number} time - Current time in seconds
+   */
+  update(time) {
+    this.structures.forEach((structureData, id) => {
+      const { spec, object, initialPosition, initialScale } = structureData;
+
+      // Update motion
+      if (spec.motion) {
+        this._updateMotion(object, spec.motion, time, initialPosition);
+      }
+
+      // Update animation
+      if (spec.animation) {
+        this._updateAnimation(object, spec.animation, time, initialScale);
+      }
+    });
+  }
+
+  /**
+   * Update structure motion
+   * @private
+   */
+  _updateMotion(object, motion, time, initialPosition) {
+    switch (motion.type) {
+      case 'move_to':
+        this._updateMoveTo(object, motion, time, initialPosition);
+        break;
+      case 'move_along':
+        this._updateMoveAlong(object, motion, time);
+        break;
+      default:
+        break;
+    }
+  }
+
+  /**
+   * Update move_to motion
+   * @private
+   */
+  _updateMoveTo(object, motion, time, initialPosition) {
+    const duration = motion.duration || 10;
+    const progress = Math.min(time / duration, 1.0);
+
+    // Apply easing
+    const easedProgress = this._applyEasing(
+      progress,
+      motion.easing || 'linear'
+    );
+
+    // Interpolate position
+    const from = initialPosition;
+    const to = motion.to;
+
+    object.position.set(
+      from[0] + (to[0] - from[0]) * easedProgress,
+      from[1] + (to[1] - from[1]) * easedProgress,
+      from[2] + (to[2] - from[2]) * easedProgress
+    );
+  }
+
+  /**
+   * Update move_along motion
+   * @private
+   */
+  _updateMoveAlong(object, motion, time) {
+    if (!motion.path || motion.path.length < 2) return;
+
+    const duration = motion.duration || 10;
+    const progress = Math.min(time / duration, 1.0);
+    const easedProgress = this._applyEasing(
+      progress,
+      motion.easing || 'linear'
+    );
+
+    // Calculate position along path
+    const pathLength = motion.path.length - 1;
+    const pathProgress = easedProgress * pathLength;
+    const segmentIndex = Math.floor(pathProgress);
+    const segmentProgress = pathProgress - segmentIndex;
+
+    if (segmentIndex >= pathLength) {
+      // End of path
+      const lastPoint = motion.path[motion.path.length - 1];
+      object.position.set(lastPoint[0], lastPoint[1], lastPoint[2]);
+    } else {
+      // Interpolate between path points
+      const from = motion.path[segmentIndex];
+      const to = motion.path[segmentIndex + 1];
+
+      object.position.set(
+        from[0] + (to[0] - from[0]) * segmentProgress,
+        from[1] + (to[1] - from[1]) * segmentProgress,
+        from[2] + (to[2] - from[2]) * segmentProgress
+      );
+    }
+  }
+
+  /**
+   * Update structure animation
+   * @private
+   */
+  _updateAnimation(object, animation, time, initialScale) {
+    switch (animation.type) {
+      case 'scale':
+        this._updateScaleAnimation(object, animation, time, initialScale);
+        break;
+      case 'rotate':
+        this._updateRotateAnimation(object, animation, time);
+        break;
+      case 'orbit':
+        this._updateOrbitAnimation(object, animation, time);
+        break;
+      default:
+        break;
+    }
+  }
+
+  /**
+   * Update scale animation
+   * @private
+   */
+  _updateScaleAnimation(object, animation, time, initialScale) {
+    const duration = animation.duration || 10;
+    const progress = Math.min(time / duration, 1.0);
+    const easedProgress = this._applyEasing(
+      progress,
+      animation.easing || 'linear'
+    );
+
+    const from = animation.from || initialScale;
+    const to = animation.to || 1.0;
+    const scale = from + (to - from) * easedProgress;
+
+    object.scale.setScalar(scale);
+  }
+
+  /**
+   * Update rotate animation
+   * @private
+   */
+  _updateRotateAnimation(object, animation, time) {
+    const speed = animation.speed || 1.0;
+    object.rotation.y = time * speed;
+  }
+
+  /**
+   * Update orbit animation
+   * @private
+   */
+  _updateOrbitAnimation(object, animation, time) {
+    const speed = animation.speed || 0.3;
+    const amplitude = animation.amplitude || 40;
+
+    const angle = time * speed;
+    object.position.x = Math.cos(angle) * amplitude;
+    object.position.z = Math.sin(angle) * amplitude;
+  }
+
+  /**
+   * Apply easing function
+   * @private
+   */
+  _applyEasing(t, easing) {
+    switch (easing) {
+      case 'ease-in':
+        return t * t;
+      case 'ease-out':
+        return t * (2 - t);
+      case 'ease-in-out':
+        return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+      case 'linear':
+      default:
+        return t;
+    }
+  }
+
+  /**
+   * Get structure object by ID
+   * @param {string} id - Structure ID
+   * @returns {Object|null} Structure data
+   */
+  getStructure(id) {
+    return this.structures.get(id) || null;
+  }
+
+  /**
+   * Dispose of all structures
+   */
+  dispose() {
+    this.structures.forEach((structureData) => {
+      const { object } = structureData;
+      object.traverse((child) => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach((mat) => mat.dispose());
+          } else {
+            child.material.dispose();
+          }
+        }
+      });
+      this.scene.remove(object);
+    });
+
+    this.structures.clear();
+  }
+}
+
+
+
+
+        // ========================================================================
+        // EntityRenderer
+        // ========================================================================
+/**
+ * EntityRenderer - Handles rendering of dynamic entities (particles, swarms, etc.)
+ * Supports attachment to moving structures and various motion types
+ */
+
+class EntityRenderer {
+  constructor(scene, options = {}) {
+    this.scene = scene;
+    this.options = options;
+    this.entities = new Map(); // id -> entity object
+    this.particleSystems = new Map(); // id -> particle system
+  }
+
+  /**
+   * Create entities from dream data
+   * @param {Array} entitiesData - Array of entity specifications
+   * @param {Map} structures - Map of structure objects for attachment
+   */
+  createEntities(entitiesData, structures) {
+    console.log(`Creating ${entitiesData.length} entities...`);
+
+    entitiesData.forEach((entitySpec) => {
+      try {
+        const entity = this._createEntity(entitySpec, structures);
+        if (entity) {
+          this.entities.set(entitySpec.id, {
+            spec: entitySpec,
+            object: entity,
+            attachedTo: entitySpec.motion?.attachTo || null,
+          });
+          this.scene.add(entity);
+        }
+      } catch (error) {
+        console.error(`Failed to create entity ${entitySpec.id}:`, error);
+      }
+    });
+
+    console.log(`Created ${this.entities.size} entities`);
+  }
+
+  /**
+   * Create a single entity based on type
+   * @private
+   */
+  _createEntity(spec, structures) {
+    const type = spec.type.toLowerCase();
+
+    // Determine entity type and create appropriate object
+    if (
+      type.includes('particle') ||
+      type.includes('stream') ||
+      type.includes('swarm')
+    ) {
+      return this._createParticleSystem(spec, structures);
+    } else if (
+      type.includes('butterfly') ||
+      type.includes('bird') ||
+      type.includes('seagull')
+    ) {
+      return this._createSwarmEntity(spec, structures);
+    } else if (type.includes('orb') || type.includes('light')) {
+      return this._createOrbEntity(spec, structures);
+    } else {
+      // Generic entity
+      return this._createGenericEntity(spec, structures);
+    }
+  }
+
+  /**
+   * Create particle system
+   * @private
+   */
+  _createParticleSystem(spec, structures) {
+    const count = spec.count || 100;
+    const params = spec.params || {};
+
+    // Create geometry
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+
+    // Parse color
+    const color = new THREE.Color(params.color || '#ffffff');
+
+    // Initialize particles
+    for (let i = 0; i < count; i++) {
+      // Random initial positions
+      positions[i * 3] = (Math.random() - 0.5) * 20;
+      positions[i * 3 + 1] = (Math.random() - 0.5) * 20;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 20;
+
+      // Colors
+      colors[i * 3] = color.r;
+      colors[i * 3 + 1] = color.g;
+      colors[i * 3 + 2] = color.b;
+
+      // Sizes
+      sizes[i] = (params.size || 1.0) * (0.5 + Math.random() * 0.5);
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+    // Create material
+    const material = new THREE.PointsMaterial({
+      size: params.size || 1.0,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    // Add glow if specified
+    if (params.glow && params.glow > 0) {
+      material.emissive = color;
+      material.emissiveIntensity = params.glow;
+    }
+
+    // Create points
+    const particles = new THREE.Points(geometry, material);
+    particles.name = spec.id;
+
+    // Store particle system data
+    this.particleSystems.set(spec.id, {
+      particles,
+      count,
+      params,
+      motion: spec.motion,
+      velocities: new Float32Array(count * 3), // For motion simulation
+    });
+
+    return particles;
+  }
+
+  /**
+   * Create swarm entity (butterflies, birds, etc.)
+   * @private
+   */
+  _createSwarmEntity(spec, structures) {
+    const count = spec.count || 10;
+    const params = spec.params || {};
+
+    // Create group to hold all swarm members
+    const swarmGroup = new THREE.Group();
+    swarmGroup.name = spec.id;
+
+    // Create individual swarm members
+    for (let i = 0; i < count; i++) {
+      const member = this._createSwarmMember(spec.type, params);
+
+      // Random initial position within radius
+      const radius = spec.motion?.radius || 10;
+      const angle = (i / count) * Math.PI * 2;
+      member.position.set(
+        Math.cos(angle) * radius * Math.random(),
+        (Math.random() - 0.5) * radius,
+        Math.sin(angle) * radius * Math.random()
+      );
+
+      swarmGroup.add(member);
+    }
+
+    return swarmGroup;
+  }
+
+  /**
+   * Create individual swarm member
+   * @private
+   */
+  _createSwarmMember(type, params) {
+    const size = params.size || 0.5;
+    const color = new THREE.Color(params.color || '#ffffff');
+
+    // Create simple geometry (triangle for butterfly/bird)
+    const geometry = new THREE.ConeGeometry(size * 0.5, size, 3);
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.8,
+    });
+
+    if (params.glow && params.glow > 0) {
+      material.emissive = color;
+      material.emissiveIntensity = params.glow;
+    }
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.rotation.x = Math.PI / 2; // Point forward
+
+    return mesh;
+  }
+
+  /**
+   * Create orb entity
+   * @private
+   */
+  _createOrbEntity(spec, structures) {
+    const count = spec.count || 10;
+    const params = spec.params || {};
+    const size = params.size || 1.0;
+    const color = new THREE.Color(params.color || '#ffffff');
+
+    // Create group for orbs
+    const orbGroup = new THREE.Group();
+    orbGroup.name = spec.id;
+
+    // Create individual orbs
+    for (let i = 0; i < count; i++) {
+      const geometry = new THREE.SphereGeometry(size * 0.5, 16, 16);
+      const material = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.7,
+      });
+
+      if (params.glow && params.glow > 0) {
+        material.emissive = color;
+        material.emissiveIntensity = params.glow;
+      }
+
+      const orb = new THREE.Mesh(geometry, material);
+
+      // Random initial position
+      const radius = spec.motion?.radius || 15;
+      const angle = (i / count) * Math.PI * 2;
+      orb.position.set(
+        Math.cos(angle) * radius,
+        (Math.random() - 0.5) * radius,
+        Math.sin(angle) * radius
+      );
+
+      orbGroup.add(orb);
+    }
+
+    return orbGroup;
+  }
+
+  /**
+   * Create generic entity
+   * @private
+   */
+  _createGenericEntity(spec, structures) {
+    const params = spec.params || {};
+    const size = params.size || 1.0;
+    const color = new THREE.Color(params.color || '#ffffff');
+
+    // Create simple cube as placeholder
+    const geometry = new THREE.BoxGeometry(size, size, size);
+    const material = new THREE.MeshStandardMaterial({
+      color,
+      transparent: true,
+      opacity: 0.8,
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = spec.id;
+
+    return mesh;
+  }
+
+  /**
+   * Update entities based on motion and time
+   * @param {number} time - Current time in seconds
+   * @param {Map} structures - Map of structure objects for attachment
+   */
+  update(time, structures) {
+    this.entities.forEach((entityData, id) => {
+      const { spec, object, attachedTo } = entityData;
+      const motion = spec.motion;
+
+      if (!motion) return;
+
+      // Get attached structure if specified
+      let attachedStructure = null;
+      if (attachedTo && structures.has(attachedTo)) {
+        attachedStructure = structures.get(attachedTo).object;
+      }
+
+      // Update based on motion type
+      switch (motion.type) {
+        case 'wander':
+          this._updateWanderMotion(object, motion, time, attachedStructure);
+          break;
+        case 'swarm':
+          this._updateSwarmMotion(object, motion, time, attachedStructure);
+          break;
+        case 'trail':
+          this._updateTrailMotion(object, motion, time, attachedStructure);
+          break;
+        case 'flow_between':
+          this._updateFlowBetweenMotion(object, motion, time, structures);
+          break;
+        default:
+          break;
+      }
+
+      // Update particle systems
+      if (this.particleSystems.has(id)) {
+        this._updateParticleSystem(id, time, attachedStructure);
+      }
+    });
+  }
+
+  /**
+   * Update wander motion
+   * @private
+   */
+  _updateWanderMotion(object, motion, time, attachedStructure) {
+    const radius = motion.radius || 10;
+    const frequency = motion.frequency || 0.5;
+    const offset = motion.offset || [0, 0, 0];
+
+    // Calculate base position (attached structure or center)
+    let baseX = 0,
+      baseY = 0,
+      baseZ = 0;
+    if (attachedStructure) {
+      baseX = attachedStructure.position.x;
+      baseY = attachedStructure.position.y;
+      baseZ = attachedStructure.position.z;
+    } else if (motion.center) {
+      [baseX, baseY, baseZ] = motion.center;
+    }
+
+    // Add offset
+    baseX += offset[0];
+    baseY += offset[1];
+    baseZ += offset[2];
+
+    // Wander pattern using sine waves
+    const wanderX = Math.sin(time * frequency) * radius;
+    const wanderY = Math.sin(time * frequency * 0.7) * radius * 0.5;
+    const wanderZ = Math.cos(time * frequency) * radius;
+
+    object.position.set(baseX + wanderX, baseY + wanderY, baseZ + wanderZ);
+  }
+
+  /**
+   * Update swarm motion
+   * @private
+   */
+  _updateSwarmMotion(object, motion, time, attachedStructure) {
+    const radius = motion.radius || 15;
+    const frequency = motion.frequency || 0.5;
+    const offset = motion.offset || [0, 0, 0];
+
+    // Calculate base position
+    let baseX = 0,
+      baseY = 0,
+      baseZ = 0;
+    if (attachedStructure) {
+      baseX = attachedStructure.position.x;
+      baseY = attachedStructure.position.y;
+      baseZ = attachedStructure.position.z;
+    } else if (motion.center) {
+      [baseX, baseY, baseZ] = motion.center;
+    }
+
+    // Add offset
+    baseX += offset[0];
+    baseY += offset[1];
+    baseZ += offset[2];
+
+    // Update each child in the swarm
+    object.children.forEach((child, index) => {
+      const phase = (index / object.children.length) * Math.PI * 2;
+      const swarmX = Math.cos(time * frequency + phase) * radius;
+      const swarmY = Math.sin(time * frequency * 0.5 + phase) * radius * 0.3;
+      const swarmZ = Math.sin(time * frequency + phase) * radius;
+
+      child.position.set(swarmX, swarmY, swarmZ);
+
+      // Rotate to face movement direction
+      child.lookAt(
+        swarmX + Math.cos(time * frequency + phase),
+        swarmY,
+        swarmZ + Math.sin(time * frequency + phase)
+      );
+    });
+
+    // Position the group at base location
+    object.position.set(baseX, baseY, baseZ);
+  }
+
+  /**
+   * Update trail motion
+   * @private
+   */
+  _updateTrailMotion(object, motion, time, attachedStructure) {
+    if (!attachedStructure) return;
+
+    const offset = motion.offset || [0, 0, 0];
+
+    // Position at attached structure with offset
+    object.position.set(
+      attachedStructure.position.x + offset[0],
+      attachedStructure.position.y + offset[1],
+      attachedStructure.position.z + offset[2]
+    );
+  }
+
+  /**
+   * Update flow between motion
+   * @private
+   */
+  _updateFlowBetweenMotion(object, motion, time, structures) {
+    if (!motion.targets || motion.targets.length < 2) return;
+
+    const target1 = structures.get(motion.targets[0])?.object;
+    const target2 = structures.get(motion.targets[1])?.object;
+
+    if (!target1 || !target2) return;
+
+    // Position between the two targets
+    const progress = (Math.sin(time * 0.5) + 1) / 2; // Oscillate between 0 and 1
+    object.position.lerpVectors(target1.position, target2.position, progress);
+  }
+
+  /**
+   * Update particle system
+   * @private
+   */
+  _updateParticleSystem(id, time, attachedStructure) {
+    const system = this.particleSystems.get(id);
+    if (!system) return;
+
+    const { particles, motion, params } = system;
+    const positions = particles.geometry.attributes.position.array;
+
+    // Update particle positions based on motion
+    for (let i = 0; i < system.count; i++) {
+      const i3 = i * 3;
+
+      // Simple animation - particles float and swirl
+      const speed = params.speed || 1.0;
+      const phase = i / system.count;
+
+      positions[i3] += Math.sin(time * speed + phase) * 0.1;
+      positions[i3 + 1] += Math.cos(time * speed * 0.7 + phase) * 0.1;
+      positions[i3 + 2] += Math.sin(time * speed * 0.5 + phase) * 0.1;
+
+      // Keep particles within bounds
+      const maxDist = motion?.radius || 20;
+      const dist = Math.sqrt(
+        positions[i3] ** 2 + positions[i3 + 1] ** 2 + positions[i3 + 2] ** 2
+      );
+      if (dist > maxDist) {
+        const scale = maxDist / dist;
+        positions[i3] *= scale;
+        positions[i3 + 1] *= scale;
+        positions[i3 + 2] *= scale;
+      }
+    }
+
+    particles.geometry.attributes.position.needsUpdate = true;
+
+    // Position particle system at attached structure if specified
+    if (attachedStructure && motion?.attachTo) {
+      const offset = motion.offset || [0, 0, 0];
+      particles.position.set(
+        attachedStructure.position.x + offset[0],
+        attachedStructure.position.y + offset[1],
+        attachedStructure.position.z + offset[2]
+      );
+    }
+  }
+
+  /**
+   * Spawn entity at runtime (for events)
+   * @param {Object} entitySpec - Entity specification
+   * @param {Map} structures - Map of structure objects
+   */
+  spawnEntity(entitySpec, structures) {
+    console.log(`Spawning entity: ${entitySpec.entityId}`);
+
+    const entity = this._createEntity(entitySpec.params, structures);
+    if (entity) {
+      this.entities.set(entitySpec.entityId, {
+        spec: entitySpec.params,
+        object: entity,
+        attachedTo: entitySpec.params.motion?.attachTo || null,
+      });
+      this.scene.add(entity);
+    }
+  }
+
+  /**
+   * Dispose of all entities
+   */
+  dispose() {
+    this.entities.forEach((entityData) => {
+      const { object } = entityData;
+      if (object.geometry) object.geometry.dispose();
+      if (object.material) {
+        if (Array.isArray(object.material)) {
+          object.material.forEach((mat) => mat.dispose());
+        } else {
+          object.material.dispose();
+        }
+      }
+      this.scene.remove(object);
+    });
+
+    this.entities.clear();
+    this.particleSystems.clear();
+  }
+}
+
+
+
+
+        // ========================================================================
+        // SceneRenderer
+        // ========================================================================
+/**
+ * SceneRenderer - Main 3D rendering engine
+ * Manages Three.js scene, camera, renderer, and coordinates all subsystems
+ */
+
+class SceneRenderer {
+  constructor(canvas, options = {}) {
+    this.canvas = canvas;
+    this.options = {
+      quality: options.quality || 'medium',
+      enableShadows: options.enableShadows !== false,
+      enablePostProcessing: options.enablePostProcessing !== false,
+      ...options,
+    };
+
+    // Three.js core objects (will be initialized)
+    this.scene = null;
+    this.camera = null;
+    this.renderer = null;
+
+    // Subsystems (will be initialized)
+    this.assetLibrary = null;
+    this.materialSystem = null;
+    this.animationController = null;
+    this.cameraController = null;
+
+    // State
+    this.renderObjects = new Map();
+    this.isAnimating = false;
+    this.currentTime = 0;
+    this.dreamData = null;
+    this.animationFrameId = null;
+    this.lastFrameTime = 0;
+    this.frameCount = 0;
+    this.fpsWarningThreshold = 20;
+
+    // Performance monitoring
+    this.performanceStats = {
+      fps: 60,
+      frameTime: 0,
+      memoryUsage: 0,
+      lowFpsCount: 0,
+      lastMemoryCheck: 0,
+    };
+    this.performanceCheckInterval = 60; // Check every 60 frames
+    this.autoQualityAdjustment = options.autoQualityAdjustment !== false;
+
+    // Initialize Three.js
+    this._initThreeJS();
+
+    // Set up resize handler
+    this._setupResizeHandler();
+  }
+
+  /**
+   * Initialize Three.js scene, camera, and renderer
+   * @private
+   */
+  _initThreeJS() {
+    // Create scene
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x000011);
+
+    // Create camera
+    const aspect = this.canvas.width / this.canvas.height;
+    this.camera = new THREE.PerspectiveCamera(
+      75, // FOV
+      aspect, // Aspect ratio
+      0.1, // Near plane
+      10000 // Far plane
+    );
+    this.camera.position.set(0, 50, 100);
+    this.camera.lookAt(0, 0, 0);
+
+    // Create renderer
+    this.renderer = new THREE.WebGLRenderer({
+      canvas: this.canvas,
+      antialias: this._getQualitySetting('antialias'),
+      alpha: true,
+      powerPreference: 'high-performance',
+    });
+
+    // Configure renderer based on quality level
+    this._configureRenderer();
+
+    // Set initial size
+    this.renderer.setSize(this.canvas.width, this.canvas.height);
+    this.renderer.setPixelRatio(
+      Math.min(
+        window.devicePixelRatio,
+        this._getQualitySetting('maxPixelRatio')
+      )
+    );
+
+    console.log(
+      `SceneRenderer initialized with quality: ${this.options.quality}`
+    );
+  }
+
+  /**
+   * Configure renderer settings based on quality level
+   * @private
+   */
+  _configureRenderer() {
+    // Shadow settings
+    if (this.options.enableShadows && this._getQualitySetting('shadows')) {
+      this.renderer.shadowMap.enabled = true;
+      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    }
+
+    // Tone mapping
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
+
+    // Color encoding
+    this.renderer.outputEncoding = THREE.sRGBEncoding;
+
+    // Additional settings
+    this.renderer.physicallyCorrectLights = true;
+  }
+
+  /**
+   * Get quality-specific settings
+   * @private
+   * @param {string} setting - Setting name
+   * @returns {*} Setting value
+   */
+  _getQualitySetting(setting) {
+    const qualitySettings = {
+      draft: {
+        antialias: false,
+        maxPixelRatio: 1,
+        shadows: false,
+        shadowMapSize: 1024,
+        geometrySegments: 8,
+        maxParticles: 1000,
+        postProcessing: false,
+      },
+      medium: {
+        antialias: true,
+        maxPixelRatio: 2,
+        shadows: true,
+        shadowMapSize: 2048,
+        geometrySegments: 16,
+        maxParticles: 5000,
+        postProcessing: true,
+      },
+      high: {
+        antialias: true,
+        maxPixelRatio: 2,
+        shadows: true,
+        shadowMapSize: 4096,
+        geometrySegments: 32,
+        maxParticles: 10000,
+        postProcessing: true,
+      },
+    };
+
+    const quality = this.options.quality || 'medium';
+    return (
+      qualitySettings[quality]?.[setting] ?? qualitySettings.medium[setting]
+    );
+  }
+
+  /**
+   * Set up viewport resize handler
+   * @private
+   */
+  _setupResizeHandler() {
+    this._resizeHandler = () => {
+      if (!this.camera || !this.renderer) return;
+
+      const width = this.canvas.clientWidth;
+      const height = this.canvas.clientHeight;
+
+      // Update camera aspect ratio
+      this.camera.aspect = width / height;
+      this.camera.updateProjectionMatrix();
+
+      // Update renderer size
+      this.renderer.setSize(width, height, false);
+
+      console.log(`Viewport resized to ${width}x${height}`);
+    };
+
+    window.addEventListener('resize', this._resizeHandler);
+
+    // Set up visibility change handler to pause/resume
+    this._visibilityHandler = () => {
+      if (document.hidden) {
+        this.pause();
+      } else {
+        this.resume();
+      }
+    };
+
+    document.addEventListener('visibilitychange', this._visibilityHandler);
+  }
+
+  /**
+   * Initialize Three.js scene from dream JSON
+   * @param {Object} dreamData - Dream JSON specification
+   * @param {number} width - Canvas width
+   * @param {number} height - Canvas height
+   */
+  initWithDream(dreamData, width, height) {
+    console.log('Initializing scene with dream data...');
+
+    // Store dream data
+    this.dreamData = dreamData;
+
+    // Set canvas size
+    this.canvas.width = width;
+    this.canvas.height = height;
+    this.renderer.setSize(width, height, false);
+
+    // Update camera aspect ratio
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+
+    // Load the scene
+    this.loadScene(dreamData);
+
+    console.log(`Scene initialized: ${width}x${height}`);
+  }
+
+  /**
+   * Render scene at specific time (for deterministic frame generation)
+   * @param {number} timeSec - Time in seconds
+   */
+  seek(timeSec) {
+    // Update current time
+    this.currentTime = timeSec;
+
+    // Update animations
+    if (this.animationController) {
+      this.animationController.update(timeSec, this.renderObjects);
+    }
+
+    // Update camera
+    if (this.cameraController) {
+      this.cameraController.update(timeSec);
+    }
+
+    // Update shader uniforms (for animated materials)
+    if (this.materialSystem) {
+      this.materialSystem.updateShaderUniforms(timeSec);
+    }
+
+    // Render the frame
+    if (this.renderer && this.scene && this.camera) {
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
+  /**
+   * Load scene from dream data
+   * @param {Object} dreamData - Dream JSON specification
+   */
+  loadScene(dreamData) {
+    console.log('Loading scene...');
+
+    // Clear existing scene
+    this.clearScene();
+
+    // Initialize subsystems
+    if (!this.assetLibrary) {
+      this.assetLibrary = new AssetLibrary(this.scene, this.options);
+    }
+    if (!this.materialSystem) {
+      this.materialSystem = new MaterialSystem(this.options);
+    }
+    if (!this.animationController) {
+      this.animationController = new AnimationController();
+    }
+
+    // Initialize structure and entity renderers
+    this.structureRenderer = new StructureRenderer(
+      this.scene,
+      this.assetLibrary,
+      this.materialSystem,
+      this.options
+    );
+    this.entityRenderer = new EntityRenderer(this.scene, this.options);
+
+    // Set up environment
+    if (dreamData.environment) {
+      this.setupEnvironment(dreamData.environment);
+    }
+
+    // Create structures
+    if (dreamData.structures && Array.isArray(dreamData.structures)) {
+      this.structureRenderer.createStructures(dreamData.structures);
+      // Store structures in renderObjects for compatibility
+      dreamData.structures.forEach((spec) => {
+        const structureData = this.structureRenderer.getStructure(spec.id);
+        if (structureData) {
+          this.renderObjects.set(spec.id, structureData);
+        }
+      });
+    }
+
+    // Create entities
+    if (dreamData.entities && Array.isArray(dreamData.entities)) {
+      this.entityRenderer.createEntities(
+        dreamData.entities,
+        this.structureRenderer.structures
+      );
+    }
+
+    // Set up camera - support both new and legacy schemas
+    if (dreamData.camera && Array.isArray(dreamData.camera)) {
+      // New camera schema
+      this.setupCamera(dreamData.camera);
+    } else if (dreamData.cinematography) {
+      // Legacy cinematography schema
+      this.setupCinematography(dreamData.cinematography);
+    } else {
+      // Initialize camera controller with default orbital view
+      if (!this.cameraController) {
+        this.cameraController = new CameraController(this.camera, this.scene);
+      }
+      this.cameraController.setupShots([]);
+    }
+
+    console.log(`Scene loaded with ${this.renderObjects.size} objects`);
+  }
+
+  /**
+   * Clear scene and dispose of all objects
+   */
+  clearScene() {
+    console.log('Clearing scene...');
+
+    // Remove all objects from scene
+    while (this.scene.children.length > 0) {
+      const object = this.scene.children[0];
+
+      // Dispose geometry and materials
+      if (object.geometry) {
+        object.geometry.dispose();
+      }
+      if (object.material) {
+        if (Array.isArray(object.material)) {
+          object.material.forEach((mat) => mat.dispose());
+        } else {
+          object.material.dispose();
+        }
+      }
+
+      this.scene.remove(object);
+    }
+
+    // Clear render objects map
+    this.renderObjects.clear();
+
+    // Reset subsystems
+    if (this.animationController) {
+      this.animationController = null;
+    }
+    if (this.cameraController) {
+      this.cameraController = null;
+    }
+
+    console.log('Scene cleared');
+  }
+
+  /**
+   * Set up environment with skybox, lighting, and atmospheric effects
+   * @param {Object} environment - Environment configuration
+   */
+  setupEnvironment(environment) {
+    console.log('Setting up environment...', environment);
+
+    if (!environment) {
+      console.warn('No environment configuration provided, using defaults');
+      environment = {};
+    }
+
+    // Initialize material system if not already created
+    if (!this.materialSystem) {
+      this.materialSystem = new MaterialSystem(this.options);
+    }
+
+    // Set up skybox
+    this._setupSkybox(environment);
+
+    // Set up lighting
+    this._setupLighting(environment);
+
+    // Set up atmospheric effects (fog)
+    this._setupAtmosphere(environment);
+
+    console.log('Environment setup complete');
+  }
+
+  /**
+   * Set up skybox based on environment configuration
+   * @private
+   * @param {Object} environment - Environment configuration
+   */
+  _setupSkybox(environment) {
+    // Determine skybox type from environment preset or explicit skybox setting
+    let skyboxType = environment.skybox;
+
+    // Map environment presets to skybox types if no explicit skybox specified
+    if (!skyboxType && environment.preset) {
+      const presetToSkybox = {
+        space: 'galaxy',
+        underwater: 'underwater',
+        forest: 'void', // Forest uses simple void with green tint
+        desert: 'sunset',
+        city: 'void',
+        dusk: 'sunset',
+        dawn: 'sunset',
+        night: 'void',
+        void: 'void',
+      };
+      skyboxType = presetToSkybox[environment.preset] || 'void';
+    }
+
+    // Default to void if nothing specified
+    skyboxType = skyboxType || 'void';
+
+    console.log(`Creating skybox: ${skyboxType}`);
+
+    // Create skybox geometry (large sphere)
+    const skyboxGeometry = new THREE.SphereGeometry(5000, 32, 32);
+
+    // Create skybox material based on type
+    let skyboxMaterial;
+    switch (skyboxType.toLowerCase()) {
+      case 'galaxy':
+        skyboxMaterial = this.materialSystem.createGalaxySkybox();
+        break;
+      case 'nebula':
+        skyboxMaterial = this.materialSystem.createNebulaSkybox();
+        break;
+      case 'sunset':
+        skyboxMaterial = this.materialSystem.createSunsetSkybox();
+        break;
+      case 'underwater':
+        skyboxMaterial = this.materialSystem.createUnderwaterSkybox();
+        break;
+      case 'void':
+      default:
+        skyboxMaterial = this.materialSystem.createVoidSkybox();
+        break;
+    }
+
+    // Create skybox mesh
+    const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
+    skybox.name = 'skybox';
+
+    // Add to scene
+    this.scene.add(skybox);
+
+    // Update scene background color if specified
+    if (environment.skyColor) {
+      try {
+        this.scene.background = new THREE.Color(environment.skyColor);
+      } catch (error) {
+        console.warn(
+          `Invalid skyColor: ${environment.skyColor}, using default`
+        );
+        this.scene.background = new THREE.Color(0x000011);
+      }
+    }
+
+    console.log(`Skybox created: ${skyboxType}`);
+  }
+
+  /**
+   * Set up lighting based on environment configuration
+   * @private
+   * @param {Object} environment - Environment configuration
+   */
+  _setupLighting(environment) {
+    const lighting = environment.lighting || {};
+
+    // Create ambient light
+    const ambientIntensity =
+      lighting.ambient !== undefined ? lighting.ambient : 0.4;
+    const ambientLight = new THREE.AmbientLight(0xffffff, ambientIntensity);
+    ambientLight.name = 'ambientLight';
+    this.scene.add(ambientLight);
+    console.log(`Ambient light created with intensity: ${ambientIntensity}`);
+
+    // Create directional light (sun-like)
+    if (lighting.directional) {
+      const dirLight = lighting.directional;
+      const intensity =
+        dirLight.intensity !== undefined ? dirLight.intensity : 1.0;
+      const position = dirLight.position || [100, 100, 50];
+      const color = dirLight.color || '#ffffff';
+
+      let lightColor;
+      try {
+        lightColor = new THREE.Color(color);
+      } catch (error) {
+        console.warn(`Invalid light color: ${color}, using white`);
+        lightColor = new THREE.Color(0xffffff);
+      }
+
+      const directionalLight = new THREE.DirectionalLight(
+        lightColor,
+        intensity
+      );
+      directionalLight.position.set(position[0], position[1], position[2]);
+      directionalLight.name = 'directionalLight';
+
+      // Configure shadows if enabled
+      if (this.options.enableShadows && this._getQualitySetting('shadows')) {
+        directionalLight.castShadow = true;
+
+        // Shadow map settings based on quality
+        const shadowMapSize = this._getQualitySetting('shadowMapSize') || 2048;
+        directionalLight.shadow.mapSize.width = shadowMapSize;
+        directionalLight.shadow.mapSize.height = shadowMapSize;
+
+        // Shadow camera bounds
+        const shadowCameraBounds = 100;
+        directionalLight.shadow.camera.left = -shadowCameraBounds;
+        directionalLight.shadow.camera.right = shadowCameraBounds;
+        directionalLight.shadow.camera.top = shadowCameraBounds;
+        directionalLight.shadow.camera.bottom = -shadowCameraBounds;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 500;
+
+        // Shadow bias to prevent artifacts
+        directionalLight.shadow.bias = -0.0001;
+
+        console.log(
+          `Directional light shadows enabled (${shadowMapSize}x${shadowMapSize})`
+        );
+      }
+
+      this.scene.add(directionalLight);
+      console.log(`Directional light created at [${position.join(', ')}]`);
+    } else {
+      // Add default directional light if none specified
+      const defaultLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      defaultLight.position.set(100, 100, 50);
+      defaultLight.name = 'directionalLight';
+
+      if (this.options.enableShadows && this._getQualitySetting('shadows')) {
+        defaultLight.castShadow = true;
+        defaultLight.shadow.mapSize.width = 2048;
+        defaultLight.shadow.mapSize.height = 2048;
+        defaultLight.shadow.camera.left = -100;
+        defaultLight.shadow.camera.right = 100;
+        defaultLight.shadow.camera.top = 100;
+        defaultLight.shadow.camera.bottom = -100;
+        defaultLight.shadow.camera.near = 0.5;
+        defaultLight.shadow.camera.far = 500;
+        defaultLight.shadow.bias = -0.0001;
+      }
+
+      this.scene.add(defaultLight);
+      console.log('Default directional light created');
+    }
+  }
+
+  /**
+   * Set up atmospheric effects (fog)
+   * @private
+   * @param {Object} environment - Environment configuration
+   */
+  _setupAtmosphere(environment) {
+    // Set up fog if specified
+    if (environment.fog !== undefined && environment.fog > 0) {
+      const fogDensity = Math.max(0, Math.min(1, environment.fog));
+
+      // Calculate fog distances based on density
+      // Higher density = closer fog
+      const near = 50 * (1 - fogDensity * 0.8);
+      const far = 1000 * (1 - fogDensity * 0.5);
+
+      // Determine fog color
+      let fogColor;
+      if (environment.skyColor) {
+        try {
+          fogColor = new THREE.Color(environment.skyColor);
+        } catch (error) {
+          console.warn(
+            `Invalid fog color: ${environment.skyColor}, using default`
+          );
+          fogColor = new THREE.Color(0x000011);
+        }
+      } else {
+        // Use scene background color or default
+        fogColor = this.scene.background || new THREE.Color(0x000011);
+      }
+
+      // Create fog
+      this.scene.fog = new THREE.Fog(fogColor, near, far);
+      console.log(
+        `Fog created with density: ${fogDensity} (near: ${near.toFixed(
+          1
+        )}, far: ${far.toFixed(1)})`
+      );
+    } else {
+      // Remove fog if it exists
+      this.scene.fog = null;
+      console.log('No fog applied');
+    }
+  }
+
+  /**
+   * Set up camera with new schema
+   * @param {Array} cameraShots - Array of camera shot specifications
+   */
+  setupCamera(cameraShots) {
+    console.log('Setting up camera...', cameraShots);
+
+    // Initialize camera controller if not already created
+    if (!this.cameraController) {
+      this.cameraController = new CameraController(this.camera, this.scene);
+    }
+
+    // Convert new camera schema to format expected by CameraController
+    const shots = cameraShots.map((shot) => {
+      return {
+        type: shot.movement,
+        target: shot.target || null,
+        lookAt: shot.lookAt || null,
+        duration: shot.duration,
+        startPos: shot.position,
+        endPos: shot.position, // Will be calculated by controller
+        fov: shot.fov,
+        easing: shot.easing,
+        transition: shot.transition,
+        startTime: shot.startTime,
+      };
+    });
+
+    this.cameraController.setupShots(shots);
+  }
+
+  /**
+   * Set up cinematography (legacy support)
+   * @param {Object} cinematography - Cinematography configuration
+   */
+  setupCinematography(cinematography) {
+    console.log('Setting up cinematography (legacy)...', cinematography);
+
+    // Initialize camera controller if not already created
+    if (!this.cameraController) {
+      this.cameraController = new CameraController(this.camera, this.scene);
+    }
+
+    // Set up shots from cinematography configuration
+    if (cinematography.shots && Array.isArray(cinematography.shots)) {
+      this.cameraController.setupShots(cinematography.shots);
+    } else {
+      // No shots specified, will use default orbital view
+      this.cameraController.setupShots([]);
+    }
+  }
+
+  /**
+   * Start animation loop
+   */
+  startAnimation() {
+    if (this.isAnimating) {
+      console.log('Animation already running');
+      return;
+    }
+
+    console.log('Starting animation loop...');
+    this.isAnimating = true;
+    this.lastFrameTime = performance.now();
+    this.frameCount = 0;
+    this._animate();
+  }
+
+  /**
+   * Animation loop (internal)
+   * @private
+   */
+  _animate() {
+    if (!this.isAnimating) return;
+
+    // Request next frame
+    this.animationFrameId = requestAnimationFrame(() => this._animate());
+
+    // Calculate delta time
+    const currentTime = performance.now();
+    const deltaTime = (currentTime - this.lastFrameTime) / 1000; // Convert to seconds
+    this.lastFrameTime = currentTime;
+
+    // Update current time
+    this.currentTime += deltaTime;
+
+    // Performance monitoring
+    this.frameCount++;
+    this._updatePerformanceStats(deltaTime);
+
+    // Check performance periodically
+    if (this.frameCount % this.performanceCheckInterval === 0) {
+      this._checkPerformance();
+    }
+
+    // Update subsystems
+    this._updateSubsystems(this.currentTime);
+
+    // Render the scene
+    if (this.renderer && this.scene && this.camera) {
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
+  /**
+   * Update all subsystems
+   * @private
+   * @param {number} time - Current time in seconds
+   */
+  _updateSubsystems(time) {
+    // Update structures
+    if (this.structureRenderer) {
+      this.structureRenderer.update(time);
+    }
+
+    // Update entities
+    if (this.entityRenderer) {
+      this.entityRenderer.update(
+        time,
+        this.structureRenderer?.structures || new Map()
+      );
+    }
+
+    // Update animations
+    if (this.animationController) {
+      this.animationController.update(time, this.renderObjects);
+    }
+
+    // Update camera
+    if (this.cameraController) {
+      this.cameraController.update(time);
+    }
+
+    // Update shader uniforms (for animated materials)
+    if (this.materialSystem) {
+      this.materialSystem.updateShaderUniforms(time);
+    }
+
+    // Handle events
+    if (this.dreamData?.events) {
+      this._handleEvents(time);
+    }
+  }
+
+  /**
+   * Handle timed events
+   * @private
+   * @param {number} time - Current time in seconds
+   */
+  _handleEvents(time) {
+    if (!this.dreamData?.events) return;
+
+    this.dreamData.events.forEach((event) => {
+      // Check if event should trigger (within 0.1s window)
+      if (Math.abs(time - event.timeSec) < 0.1 && !event._triggered) {
+        event._triggered = true;
+        this._triggerEvent(event);
+      }
+    });
+  }
+
+  /**
+   * Trigger an event
+   * @private
+   * @param {Object} event - Event specification
+   */
+  _triggerEvent(event) {
+    console.log(`Triggering event at ${event.timeSec}s:`, event.type);
+
+    switch (event.type) {
+      case 'spawn_entity':
+        if (this.entityRenderer) {
+          this.entityRenderer.spawnEntity(
+            event,
+            this.structureRenderer?.structures || new Map()
+          );
+        }
+        break;
+      case 'explosion':
+        this._handleExplosion(event);
+        break;
+      case 'environment_change':
+        this._handleEnvironmentChange(event);
+        break;
+      default:
+        console.warn(`Unknown event type: ${event.type}`);
+    }
+  }
+
+  /**
+   * Handle explosion event
+   * @private
+   */
+  _handleExplosion(event) {
+    // Create explosion particles
+    const particleCount = event.particleCount || 500;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+
+    // Get explosion center from targets
+    let centerX = 0,
+      centerY = 0,
+      centerZ = 0;
+    if (event.targets && event.targets.length > 0) {
+      const target = this.renderObjects.get(event.targets[0]);
+      if (target?.object) {
+        centerX = target.object.position.x;
+        centerY = target.object.position.y;
+        centerZ = target.object.position.z;
+      }
+    }
+
+    // Create explosion particles
+    for (let i = 0; i < particleCount; i++) {
+      positions[i * 3] = centerX + (Math.random() - 0.5) * 10;
+      positions[i * 3 + 1] = centerY + (Math.random() - 0.5) * 10;
+      positions[i * 3 + 2] = centerZ + (Math.random() - 0.5) * 10;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    const material = new THREE.PointsMaterial({
+      size: 2.0,
+      color: '#FF6600',
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+    });
+
+    const explosionParticles = new THREE.Points(geometry, material);
+    this.scene.add(explosionParticles);
+
+    // Remove after a short time
+    setTimeout(() => {
+      this.scene.remove(explosionParticles);
+      geometry.dispose();
+      material.dispose();
+    }, 2000);
+
+    // Light flash
+    if (event.lightFlash) {
+      const flash = new THREE.PointLight('#FFFFFF', 10, 100);
+      flash.position.set(centerX, centerY, centerZ);
+      this.scene.add(flash);
+
+      setTimeout(() => {
+        this.scene.remove(flash);
+      }, 200);
+    }
+  }
+
+  /**
+   * Handle environment change event
+   * @private
+   */
+  _handleEnvironmentChange(event) {
+    if (!event.params) return;
+
+    // Gradually change environment settings
+    const duration = event.params.duration || 1;
+    const startTime = this.currentTime;
+
+    // Store original values
+    const originalAmbient = this.scene.children.find(
+      (c) => c.name === 'ambientLight'
+    )?.intensity;
+    const originalFog = this.scene.fog?.far;
+
+    // Animate changes (simplified - would need proper tweening in production)
+    if (event.params.ambientLight !== undefined) {
+      const ambientLight = this.scene.children.find(
+        (c) => c.name === 'ambientLight'
+      );
+      if (ambientLight) {
+        ambientLight.intensity = event.params.ambientLight;
+      }
+    }
+
+    if (event.params.fog !== undefined && this.scene.fog) {
+      const fogDensity = event.params.fog;
+      const near = 50 * (1 - fogDensity * 0.8);
+      const far = 1000 * (1 - fogDensity * 0.5);
+      this.scene.fog.near = near;
+      this.scene.fog.far = far;
+    }
+  }
+
+  /**
+   * Pause rendering
+   */
+  pause() {
+    if (!this.isAnimating) return;
+
+    console.log('Pausing animation...');
+    this.isAnimating = false;
+
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+  }
+
+  /**
+   * Resume rendering
+   */
+  resume() {
+    if (this.isAnimating) return;
+
+    console.log('Resuming animation...');
+    this.isAnimating = true;
+    this.lastFrameTime = performance.now();
+    this._animate();
+  }
+
+  /**
+   * Update performance statistics
+   * @private
+   * @param {number} deltaTime - Time since last frame in seconds
+   */
+  _updatePerformanceStats(deltaTime) {
+    // Calculate FPS
+    const fps = 1 / deltaTime;
+    this.performanceStats.fps = fps;
+    this.performanceStats.frameTime = deltaTime * 1000; // Convert to ms
+
+    // Track low FPS occurrences
+    if (fps < this.fpsWarningThreshold) {
+      this.performanceStats.lowFpsCount++;
+    }
+  }
+
+  /**
+   * Check performance and log warnings or adjust quality
+   * @private
+   */
+  _checkPerformance() {
+    const stats = this.performanceStats;
+
+    // Log FPS warning if below threshold
+    if (stats.fps < this.fpsWarningThreshold) {
+      console.warn(
+        `Low FPS detected: ${stats.fps.toFixed(
+          1
+        )} FPS (frame time: ${stats.frameTime.toFixed(2)}ms)`
+      );
+    }
+
+    // Check memory usage if available
+    if (performance.memory) {
+      const memoryMB = performance.memory.usedJSHeapSize / (1024 * 1024);
+      stats.memoryUsage = memoryMB;
+
+      // Log memory warning if usage is high
+      if (memoryMB > 512) {
+        console.warn(`High memory usage detected: ${memoryMB.toFixed(1)} MB`);
+      }
+
+      // Auto-adjust quality if enabled and performance is poor
+      if (
+        this.autoQualityAdjustment &&
+        stats.lowFpsCount > 10 &&
+        this.options.quality !== 'draft'
+      ) {
+        this._adjustQualityDown();
+      }
+    }
+
+    // Log performance stats periodically
+    if (this.frameCount % (this.performanceCheckInterval * 10) === 0) {
+      console.log(
+        `Performance Stats - FPS: ${stats.fps.toFixed(
+          1
+        )}, Frame Time: ${stats.frameTime.toFixed(
+          2
+        )}ms, Memory: ${stats.memoryUsage.toFixed(1)}MB`
+      );
+    }
+
+    // Reset low FPS counter periodically
+    if (this.frameCount % (this.performanceCheckInterval * 5) === 0) {
+      stats.lowFpsCount = 0;
+    }
+  }
+
+  /**
+   * Automatically reduce quality level to improve performance
+   * @private
+   */
+  _adjustQualityDown() {
+    const currentQuality = this.options.quality;
+    let newQuality;
+
+    if (currentQuality === 'high') {
+      newQuality = 'medium';
+    } else if (currentQuality === 'medium') {
+      newQuality = 'draft';
+    } else {
+      // Already at lowest quality
+      console.warn(
+        'Performance issues detected but already at lowest quality level'
+      );
+      return;
+    }
+
+    console.warn(
+      `Auto-adjusting quality from ${currentQuality} to ${newQuality} due to performance issues`
+    );
+
+    // Update quality setting
+    this.options.quality = newQuality;
+
+    // Reconfigure renderer with new quality settings
+    this._configureRenderer();
+
+    // Reset low FPS counter
+    this.performanceStats.lowFpsCount = 0;
+
+    // Note: Existing objects won't be updated, but new objects will use the new quality
+    // For a full quality change, the scene would need to be reloaded
+  }
+
+  /**
+   * Get current performance statistics
+   * @returns {Object} Performance statistics
+   */
+  getPerformanceStats() {
+    return {
+      fps: this.performanceStats.fps,
+      frameTime: this.performanceStats.frameTime,
+      memoryUsage: this.performanceStats.memoryUsage,
+      quality: this.options.quality,
+      objectCount: this.renderObjects.size,
+    };
+  }
+
+  /**
+   * Clean up all resources
+   */
+  dispose() {
+    console.log('Disposing SceneRenderer resources...');
+
+    // Stop animation
+    this.pause();
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+
+    // Remove resize handler
+    if (this._resizeHandler) {
+      window.removeEventListener('resize', this._resizeHandler);
+      this._resizeHandler = null;
+    }
+
+    // Remove visibility handler
+    if (this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      this._visibilityHandler = null;
+    }
+
+    // Dispose subsystems
+    if (this.assetLibrary && typeof this.assetLibrary.dispose === 'function') {
+      this.assetLibrary.dispose();
+    }
+    if (
+      this.materialSystem &&
+      typeof this.materialSystem.dispose === 'function'
+    ) {
+      this.materialSystem.dispose();
+    }
+
+    // Dispose scene objects
+    if (this.scene) {
+      this.scene.traverse((object) => {
+        if (object.geometry) {
+          object.geometry.dispose();
+        }
+        if (object.material) {
+          if (Array.isArray(object.material)) {
+            object.material.forEach((mat) => mat.dispose());
+          } else {
+            object.material.dispose();
+          }
+        }
+      });
+      this.scene.clear();
+    }
+
+    // Dispose renderer
+    if (this.renderer) {
+      this.renderer.dispose();
+      this.renderer = null;
+    }
+
+    // Clear state
+    this.renderObjects.clear();
+    this.dreamData = null;
+
+    console.log('SceneRenderer disposed');
+  }
+}
+
+
+
+
+        // ========================================================================
         // TASK 10.2: Parameter Validation Utilities
         // ========================================================================
         /**

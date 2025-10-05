@@ -263,29 +263,57 @@ class SceneRenderer {
     // Clear existing scene
     this.clearScene();
 
-    // Initialize subsystems (placeholders for now, will be implemented in later tasks)
-    // this.assetLibrary = new AssetLibrary(this.scene, this.options);
-    // this.materialSystem = new MaterialSystem(this.options);
-    // this.animationController = new AnimationController();
-    // this.cameraController = new CameraController(this.camera);
+    // Initialize subsystems
+    if (!this.assetLibrary) {
+      this.assetLibrary = new AssetLibrary(this.scene, this.options);
+    }
+    if (!this.materialSystem) {
+      this.materialSystem = new MaterialSystem(this.options);
+    }
+    if (!this.animationController) {
+      this.animationController = new AnimationController();
+    }
 
-    // Set up environment (will be implemented in task 7)
+    // Initialize structure and entity renderers
+    this.structureRenderer = new StructureRenderer(
+      this.scene,
+      this.assetLibrary,
+      this.materialSystem,
+      this.options
+    );
+    this.entityRenderer = new EntityRenderer(this.scene, this.options);
+
+    // Set up environment
     if (dreamData.environment) {
       this.setupEnvironment(dreamData.environment);
     }
 
-    // Create structures (will be implemented in task 3)
+    // Create structures
     if (dreamData.structures && Array.isArray(dreamData.structures)) {
-      this.createStructures(dreamData.structures);
+      this.structureRenderer.createStructures(dreamData.structures);
+      // Store structures in renderObjects for compatibility
+      dreamData.structures.forEach((spec) => {
+        const structureData = this.structureRenderer.getStructure(spec.id);
+        if (structureData) {
+          this.renderObjects.set(spec.id, structureData);
+        }
+      });
     }
 
-    // Create entities (will be implemented in task 3)
+    // Create entities
     if (dreamData.entities && Array.isArray(dreamData.entities)) {
-      this.createEntities(dreamData.entities);
+      this.entityRenderer.createEntities(
+        dreamData.entities,
+        this.structureRenderer.structures
+      );
     }
 
-    // Set up cinematography
-    if (dreamData.cinematography) {
+    // Set up camera - support both new and legacy schemas
+    if (dreamData.camera && Array.isArray(dreamData.camera)) {
+      // New camera schema
+      this.setupCamera(dreamData.camera);
+    } else if (dreamData.cinematography) {
+      // Legacy cinematography schema
       this.setupCinematography(dreamData.cinematography);
     } else {
       // Initialize camera controller with default orbital view
@@ -579,29 +607,42 @@ class SceneRenderer {
   }
 
   /**
-   * Create structures (placeholder - will be implemented in task 3)
-   * @param {Array} structures - Array of structure specifications
+   * Set up camera with new schema
+   * @param {Array} cameraShots - Array of camera shot specifications
    */
-  createStructures(structures) {
-    console.log(`Creating ${structures.length} structures...`);
-    // Will be implemented in task 3
+  setupCamera(cameraShots) {
+    console.log('Setting up camera...', cameraShots);
+
+    // Initialize camera controller if not already created
+    if (!this.cameraController) {
+      this.cameraController = new CameraController(this.camera, this.scene);
+    }
+
+    // Convert new camera schema to format expected by CameraController
+    const shots = cameraShots.map((shot) => {
+      return {
+        type: shot.movement,
+        target: shot.target || null,
+        lookAt: shot.lookAt || null,
+        duration: shot.duration,
+        startPos: shot.position,
+        endPos: shot.position, // Will be calculated by controller
+        fov: shot.fov,
+        easing: shot.easing,
+        transition: shot.transition,
+        startTime: shot.startTime,
+      };
+    });
+
+    this.cameraController.setupShots(shots);
   }
 
   /**
-   * Create entities (placeholder - will be implemented in task 3)
-   * @param {Array} entities - Array of entity specifications
-   */
-  createEntities(entities) {
-    console.log(`Creating ${entities.length} entities...`);
-    // Will be implemented in task 3
-  }
-
-  /**
-   * Set up cinematography
+   * Set up cinematography (legacy support)
    * @param {Object} cinematography - Cinematography configuration
    */
   setupCinematography(cinematography) {
-    console.log('Setting up cinematography...', cinematography);
+    console.log('Setting up cinematography (legacy)...', cinematography);
 
     // Initialize camera controller if not already created
     if (!this.cameraController) {
@@ -675,6 +716,19 @@ class SceneRenderer {
    * @param {number} time - Current time in seconds
    */
   _updateSubsystems(time) {
+    // Update structures
+    if (this.structureRenderer) {
+      this.structureRenderer.update(time);
+    }
+
+    // Update entities
+    if (this.entityRenderer) {
+      this.entityRenderer.update(
+        time,
+        this.structureRenderer?.structures || new Map()
+      );
+    }
+
     // Update animations
     if (this.animationController) {
       this.animationController.update(time, this.renderObjects);
@@ -688,6 +742,154 @@ class SceneRenderer {
     // Update shader uniforms (for animated materials)
     if (this.materialSystem) {
       this.materialSystem.updateShaderUniforms(time);
+    }
+
+    // Handle events
+    if (this.dreamData?.events) {
+      this._handleEvents(time);
+    }
+  }
+
+  /**
+   * Handle timed events
+   * @private
+   * @param {number} time - Current time in seconds
+   */
+  _handleEvents(time) {
+    if (!this.dreamData?.events) return;
+
+    this.dreamData.events.forEach((event) => {
+      // Check if event should trigger (within 0.1s window)
+      if (Math.abs(time - event.timeSec) < 0.1 && !event._triggered) {
+        event._triggered = true;
+        this._triggerEvent(event);
+      }
+    });
+  }
+
+  /**
+   * Trigger an event
+   * @private
+   * @param {Object} event - Event specification
+   */
+  _triggerEvent(event) {
+    console.log(`Triggering event at ${event.timeSec}s:`, event.type);
+
+    switch (event.type) {
+      case 'spawn_entity':
+        if (this.entityRenderer) {
+          this.entityRenderer.spawnEntity(
+            event,
+            this.structureRenderer?.structures || new Map()
+          );
+        }
+        break;
+      case 'explosion':
+        this._handleExplosion(event);
+        break;
+      case 'environment_change':
+        this._handleEnvironmentChange(event);
+        break;
+      default:
+        console.warn(`Unknown event type: ${event.type}`);
+    }
+  }
+
+  /**
+   * Handle explosion event
+   * @private
+   */
+  _handleExplosion(event) {
+    // Create explosion particles
+    const particleCount = event.particleCount || 500;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+
+    // Get explosion center from targets
+    let centerX = 0,
+      centerY = 0,
+      centerZ = 0;
+    if (event.targets && event.targets.length > 0) {
+      const target = this.renderObjects.get(event.targets[0]);
+      if (target?.object) {
+        centerX = target.object.position.x;
+        centerY = target.object.position.y;
+        centerZ = target.object.position.z;
+      }
+    }
+
+    // Create explosion particles
+    for (let i = 0; i < particleCount; i++) {
+      positions[i * 3] = centerX + (Math.random() - 0.5) * 10;
+      positions[i * 3 + 1] = centerY + (Math.random() - 0.5) * 10;
+      positions[i * 3 + 2] = centerZ + (Math.random() - 0.5) * 10;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    const material = new THREE.PointsMaterial({
+      size: 2.0,
+      color: '#FF6600',
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+    });
+
+    const explosionParticles = new THREE.Points(geometry, material);
+    this.scene.add(explosionParticles);
+
+    // Remove after a short time
+    setTimeout(() => {
+      this.scene.remove(explosionParticles);
+      geometry.dispose();
+      material.dispose();
+    }, 2000);
+
+    // Light flash
+    if (event.lightFlash) {
+      const flash = new THREE.PointLight('#FFFFFF', 10, 100);
+      flash.position.set(centerX, centerY, centerZ);
+      this.scene.add(flash);
+
+      setTimeout(() => {
+        this.scene.remove(flash);
+      }, 200);
+    }
+  }
+
+  /**
+   * Handle environment change event
+   * @private
+   */
+  _handleEnvironmentChange(event) {
+    if (!event.params) return;
+
+    // Gradually change environment settings
+    const duration = event.params.duration || 1;
+    const startTime = this.currentTime;
+
+    // Store original values
+    const originalAmbient = this.scene.children.find(
+      (c) => c.name === 'ambientLight'
+    )?.intensity;
+    const originalFog = this.scene.fog?.far;
+
+    // Animate changes (simplified - would need proper tweening in production)
+    if (event.params.ambientLight !== undefined) {
+      const ambientLight = this.scene.children.find(
+        (c) => c.name === 'ambientLight'
+      );
+      if (ambientLight) {
+        ambientLight.intensity = event.params.ambientLight;
+      }
+    }
+
+    if (event.params.fog !== undefined && this.scene.fog) {
+      const fogDensity = event.params.fog;
+      const near = 50 * (1 - fogDensity * 0.8);
+      const far = 1000 * (1 - fogDensity * 0.5);
+      this.scene.fog.near = near;
+      this.scene.fog.far = far;
     }
   }
 

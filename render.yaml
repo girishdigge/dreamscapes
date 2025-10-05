@@ -1,0 +1,86 @@
+services:
+  # Render Worker Service
+  - type: web
+    name: dreamscapes-render-worker
+    env: docker
+    dockerfilePath: ./services/render-worker/Dockerfile
+    dockerContext: ./services/render-worker
+    plan: free
+    region: frankfurt
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8001
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/chromium
+      - key: CHROMIUM_PATH
+        value: /usr/bin/chromium
+    healthCheckPath: /health
+
+  # MCP Gateway Service
+  - type: web
+    name: dreamscapes-mcp-gateway
+    env: docker
+    dockerfilePath: ./services/mcp-gateway/Dockerfile
+    dockerContext: .
+    plan: free
+    region: frankfurt
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8080
+      - key: CEREBRAS_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: RENDER_WORKER_URL
+        value: https://dreamscapes-render-worker.onrender.com
+    healthCheckPath: /health
+
+  # Express Orchestrator Service
+  - type: web
+    name: dreamscapes-express
+    env: docker
+    dockerfilePath: ./services/express/Dockerfile
+    dockerContext: .
+    plan: free
+    region: frankfurt
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8000
+      - key: MCP_GATEWAY_URL
+        value: https://dreamscapes-mcp-gateway.onrender.com
+      - key: RENDER_WORKER_URL
+        value: https://dreamscapes-render-worker.onrender.com
+    healthCheckPath: /health
+
+  # Frontend Service
+  - type: web
+    name: dreamscapes-frontend
+    env: docker
+    dockerfilePath: ./services/frontend/next-app/Dockerfile
+    dockerContext: ./services/frontend/next-app
+    plan: free
+    region: frankfurt
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: NEXT_PUBLIC_API_URL
+        value: https://dreamscapes-express.onrender.com
+      - key: API_URL
+        value: https://dreamscapes-express.onrender.com
+    healthCheckPath: /
+
+  # Redis Database - Commented out for now (requires paid plan for IP allowlist)
+  # - type: redis
+  #   name: dreamscapes-redis
+  #   plan: free
+  #   region: frankfurt
+  #   maxmemoryPolicy: allkeys-lru
+  #   ipAllowList: []

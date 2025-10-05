@@ -1,0 +1,222 @@
+{
+  "id": "550e8400-e29b-41d4-a716-446655440010",
+  "title": "⭐ Cosmic Star Collision",
+  "style": "fantasy",
+  "created": "2025-01-15T14:00:00.000Z",
+  "source": "sample",
+  "structures": [
+    {
+      "id": "star_blue",
+      "type": "sphere",
+      "pos": [-100, 0, 0],
+      "scale": 8.0,
+      "rotation": [0, 0, 0],
+      "features": ["emissive", "glow"],
+      "material": {
+        "color": "#4A90E2",
+        "emissive": "#4A90E2",
+        "emissiveIntensity": 3.0,
+        "metalness": 0.1,
+        "roughness": 0.2
+      },
+      "motion": {
+        "type": "move_to",
+        "to": [0, 0, 0],
+        "duration": 10,
+        "easing": "ease-in"
+      }
+    },
+    {
+      "id": "star_orange",
+      "type": "sphere",
+      "pos": [100, 0, 0],
+      "scale": 10.0,
+      "rotation": [0, 0, 0],
+      "features": ["emissive", "glow"],
+      "material": {
+        "color": "#FF6B35",
+        "emissive": "#FF6B35",
+        "emissiveIntensity": 3.5,
+        "metalness": 0.1,
+        "roughness": 0.2
+      },
+      "motion": {
+        "type": "move_to",
+        "to": [0, 0, 0],
+        "duration": 10,
+        "easing": "ease-in"
+      }
+    },
+    {
+      "id": "corona_blue",
+      "type": "sphere",
+      "pos": [-100, 0, 0],
+      "scale": 12.0,
+      "rotation": [0, 0, 0],
+      "features": ["transparent"],
+      "material": {
+        "color": "#4A90E2",
+        "opacity": 0.3,
+        "transparent": true
+      },
+      "attachTo": "star_blue"
+    },
+    {
+      "id": "corona_orange",
+      "type": "sphere",
+      "pos": [100, 0, 0],
+      "scale": 15.0,
+      "rotation": [0, 0, 0],
+      "features": ["transparent"],
+      "material": {
+        "color": "#FF6B35",
+        "opacity": 0.3,
+        "transparent": true
+      },
+      "attachTo": "star_orange"
+    }
+  ],
+  "entities": [
+    {
+      "id": "energy_bridge",
+      "type": "particle_stream",
+      "count": 300,
+      "params": {
+        "speed": 3.0,
+        "glow": 1.0,
+        "size": 0.8,
+        "color": "#FFFFFF",
+        "lifetime": 2.0
+      },
+      "motion": {
+        "type": "flow_between",
+        "targets": ["star_blue", "star_orange"],
+        "duration": 10
+      }
+    },
+    {
+      "id": "blue_flares",
+      "type": "particle_emitter",
+      "count": 100,
+      "params": {
+        "speed": 1.5,
+        "glow": 0.9,
+        "size": 1.2,
+        "color": "#4A90E2",
+        "spread": 360
+      },
+      "attachTo": "star_blue"
+    },
+    {
+      "id": "orange_flares",
+      "type": "particle_emitter",
+      "count": 120,
+      "params": {
+        "speed": 1.8,
+        "glow": 0.9,
+        "size": 1.5,
+        "color": "#FF6B35",
+        "spread": 360
+      },
+      "attachTo": "star_orange"
+    }
+  ],
+  "camera": [
+    {
+      "startTime": 0,
+      "duration": 5,
+      "position": [0, 40, 150],
+      "lookAt": [0, 0, 0],
+      "fov": 50,
+      "movement": "static",
+      "easing": "linear"
+    },
+    {
+      "startTime": 5,
+      "duration": 5,
+      "position": [80, 30, 120],
+      "target": "star_blue",
+      "fov": 55,
+      "movement": "tracking",
+      "easing": "ease-in-out"
+    },
+    {
+      "startTime": 10,
+      "duration": 8,
+      "position": [150, 100, 150],
+      "lookAt": [0, 0, 0],
+      "fov": 70,
+      "movement": "pull_back",
+      "easing": "ease-out"
+    }
+  ],
+  "events": [
+    {
+      "timeSec": 10,
+      "type": "explosion",
+      "targets": ["star_blue", "star_orange"],
+      "particleCount": 800,
+      "particleColor": "#FFFFFF",
+      "lightFlash": true,
+      "flashColor": "#FFFFFF",
+      "flashIntensity": 5.0,
+      "cameraShake": {
+        "amplitude": 3,
+        "duration": 2.0,
+        "frequency": 10
+      }
+    },
+    {
+      "timeSec": 10.5,
+      "type": "shockwave",
+      "position": [0, 0, 0],
+      "radius": 50,
+      "duration": 3.0,
+      "color": "#FFFFFF",
+      "opacity": 0.5
+    }
+  ],
+  "environment": {
+    "preset": "space",
+    "fog": 0.02,
+    "skyColor": "#000814",
+    "ambientLight": 0.15,
+    "skybox": "stars",
+    "lighting": {
+      "ambient": 0.15,
+      "directional": {
+        "intensity": 0.2,
+        "position": [100, 100, 100],
+        "color": "#FFFFFF"
+      },
+      "point": [
+        {
+          "position": [-100, 0, 0],
+          "color": "#4A90E2",
+          "intensity": 2.0,
+          "distance": 100,
+          "attachTo": "star_blue"
+        },
+        {
+          "position": [100, 0, 0],
+          "color": "#FF6B35",
+          "intensity": 2.5,
+          "distance": 120,
+          "attachTo": "star_orange"
+        }
+      ]
+    }
+  },
+  "render": {
+    "res": [1920, 1080],
+    "fps": 30,
+    "quality": "high",
+    "duration": 18
+  },
+  "metadata": {
+    "seed": 42,
+    "originalText": "Two massive stars collide in deep space with spectacular particle effects",
+    "requestedStyle": "fantasy",
+    "version": "2.0.0"
+  }
+}

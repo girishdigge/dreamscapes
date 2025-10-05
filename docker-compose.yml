@@ -1,21 +1,21 @@
 services:
-  # LLaMA FastAPI microservice
-  llama-stylist:
-    build:
-      context: ./services/llama-stylist
-      target: development # Default to development, override in prod
-    ports:
-      - '8002:8000'
-    environment:
-      - PYTHONPATH=/app
-      - PORT=8000
-    healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    restart: unless-stopped
+  # LLaMA FastAPI microservice - DISABLED (not needed for MVP)
+  # llama-stylist:
+  #   build:
+  #     context: ./services/llama-stylist
+  #     target: development
+  #   ports:
+  #     - '8002:8000'
+  #   environment:
+  #     - PYTHONPATH=/app
+  #     - PORT=8000
+  #   healthcheck:
+  #     test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 30s
+  #   restart: unless-stopped
 
   # Render Worker - Puppeteer + FFmpeg for video generation
   render-worker:
@@ -67,7 +67,7 @@ services:
       # Provider Configuration
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4}
-      - LLAMA_URL=http://llama-stylist:8000
+      # - LLAMA_URL=http://llama-stylist:8000  # Disabled - not needed for MVP
       - RENDER_WORKER_URL=http://render-worker:8001
       # Enhanced Caching Configuration
       - REDIS_URL=redis://redis:6379
@@ -86,8 +86,8 @@ services:
       - METRICS_INTERVAL=${METRICS_INTERVAL:-60000}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     depends_on:
-      llama-stylist:
-        condition: service_healthy
+      # llama-stylist:  # Disabled - not needed for MVP
+      #   condition: service_healthy
       render-worker:
         condition: service_started
       redis:
@@ -122,13 +122,14 @@ services:
       target: development # Default to development, override in prod
     volumes:
       - ./shared:/app/shared:ro
+      - ./sample_dreams:/app/sample_dreams:ro
     ports:
       - '8000:8000'
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - PORT=8000
       - MCP_GATEWAY_URL=http://mcp-gateway:8080
-      - LLAMA_URL=http://llama-stylist:8000
+      # - LLAMA_URL=http://llama-stylist:8000  # Disabled - not needed for MVP
       - RENDER_WORKER_URL=http://render-worker:8001
       - ENABLE_FALLBACK_DEMOS=${ENABLE_FALLBACK_DEMOS:-true}
       - MAX_CACHE_SIZE=${MAX_CACHE_SIZE:-1000}
@@ -156,6 +157,9 @@ services:
     build:
       context: ./services/frontend/next-app
       target: development # Default to development, override in prod
+    volumes:
+      # Mount sample_dreams directory for API access
+      - ./sample_dreams:/app/sample_dreams:ro
     ports:
       - '3000:3000'
     environment:

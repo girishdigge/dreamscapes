@@ -1,16 +1,9 @@
 // services/express/utils/dreamValidator.js
-const { UnifiedValidator, utils } = require('@dreamscapes/shared');
-const logger = require('./logger').logger;
-
-// Initialize unified validator
-const unifiedValidator = new UnifiedValidator({
-  strictMode: false, // Less strict for utility validation
-  logErrors: true,
-});
-
-// Legacy AJV support for backward compatibility
 const Ajv = require('ajv');
 const addFormats = require('ajv-formats');
+const logger = require('./logger').logger;
+
+// Initialize AJV with formats
 const ajv = new Ajv({
   allErrors: true,
   removeAdditional: false,
@@ -333,7 +326,7 @@ const dreamValidationSchema = {
 const validateDreamStructure = ajv.compile(dreamValidationSchema);
 
 /**
- * Comprehensive dream validation using unified validator
+ * Comprehensive dream validation
  * @param {Object} dreamData - Dream object to validate
  * @param {Object} options - Validation options
  * @returns {Object} Validation result
@@ -346,40 +339,37 @@ function validateDream(dreamData, options = {}) {
     validateTiming = true,
   } = options;
 
-  // Basic structure validation
-  if (!dreamData || typeof dreamData !== 'object') {
-    return {
-      valid: false,
-      errors: ['Dream data must be a valid object'],
-      warnings: [],
-      suggestions: [],
-      stats: {},
-    };
-  }
-
-  // Use unified validator for comprehensive validation
-  const validationResult = unifiedValidator.validateDreamObject(dreamData, {
-    strictMode: strict,
-  });
-
   const result = {
-    valid: validationResult.valid,
-    errors: validationResult.errors.map(
-      (error) => error.message || `${error.field}: ${error.error}`
-    ),
+    valid: true,
+    errors: [],
     warnings: [],
     suggestions: [],
     stats: {},
   };
 
-  // Add warnings from validation
-  if (validationResult.categorized) {
-    result.warnings = validationResult.categorized.warning.map(
-      (warn) => warn.message || `${warn.field}: ${warn.error}`
-    );
+  // Basic structure validation
+  if (!dreamData || typeof dreamData !== 'object') {
+    result.valid = false;
+    result.errors.push('Dream data must be a valid object');
+    return result;
   }
 
-  // Additional semantic validations for backward compatibility
+  // Schema validation
+  const schemaValid = validateDreamStructure(dreamData);
+  if (!schemaValid) {
+    result.valid = false;
+    result.errors = validateDreamStructure.errors.map((error) =>
+      formatValidationError(error)
+    );
+
+    if (!strict) {
+      // Try to continue with additional validations for better error reporting
+    } else {
+      return result;
+    }
+  }
+
+  // Additional semantic validations
   if (dreamData.cinematography && validateTiming) {
     const timingValidation = validateCinematographyTiming(
       dreamData.cinematography
@@ -606,60 +596,112 @@ function validatePerformance(dreamData) {
 }
 
 /**
- * Generate statistics about the dream (using shared utilities)
+ * Generate statistics about the dream
  */
 function generateDreamStats(dreamData) {
-  return utils.generateDreamStats(dreamData);
+  const stats = {
+    structures: dreamData.structures?.length || 0,
+    entities: dreamData.entities?.length || 0,
+    totalEntityCount:
+      dreamData.entities?.reduce((sum, e) => sum + (e.count || 0), 0) || 0,
+    shots: dreamData.cinematography?.shots?.length || 0,
+    duration: dreamData.cinematography?.durationSec || 0,
+    assumptions: dreamData.assumptions?.length || 0,
+  };
+
+  // Calculate complexity score
+  stats.complexityScore = calculateComplexityScore(dreamData);
+  stats.complexityRating = getComplexityRating(stats.complexityScore);
+
+  return stats;
 }
 
 /**
- * Calculate a complexity score for the dream (using shared utilities)
+ * Calculate a complexity score for the dream
  */
 function calculateComplexityScore(dreamData) {
-  return utils.calculateComplexityScore(dreamData);
+  let score = 0;
+
+  // Base complexity from counts
+  score += (dreamData.structures?.length || 0) * 2;
+  score += (dreamData.entities?.length || 0) * 1;
+  score += Math.min((dreamData.cinematography?.shots?.length || 0) * 0.5, 5);
+
+  // Entity count impact
+  const totalEntities =
+    dreamData.entities?.reduce((sum, e) => sum + (e.count || 0), 0) || 0;
+  score += Math.min(totalEntities / 50, 10);
+
+  // Duration impact
+  const duration = dreamData.cinematography?.durationSec || 0;
+  score += Math.min(duration / 30, 5);
+
+  return Math.round(score * 10) / 10;
 }
 
 /**
- * Get complexity rating from score (using shared utilities)
+ * Get complexity rating from score
  */
 function getComplexityRating(score) {
-  return utils.getComplexityRating(score);
+  if (score < 5) return 'simple';
+  if (score < 15) return 'moderate';
+  if (score < 25) return 'complex';
+  return 'very_complex';
 }
 
 /**
- * Format AJV validation errors into readable messages (using shared utilities)
+ * Format AJV validation errors into readable messages
  */
 function formatValidationError(error) {
-  return utils.formatValidationError(error);
+  const path = error.instancePath || error.schemaPath || '';
+  const field = path.split('/').pop() || 'root';
+
+  switch (error.keyword) {
+    case 'required':
+      return `Missing required field: ${error.params.missingProperty}`;
+    case 'type':
+      return `${field}: expected ${error.schema}, got ${typeof error.data}`;
+    case 'enum':
+      return `${field}: must be one of [${error.schema.join(', ')}]`;
+    case 'minimum':
+      return `${field}: must be >= ${error.schema}`;
+    case 'maximum':
+      return `${field}: must be <= ${error.schema}`;
+    case 'minLength':
+      return `${field}: must be at least ${error.schema} characters`;
+    case 'maxLength':
+      return `${field}: must be at most ${error.schema} characters`;
+    case 'pattern':
+      return `${field}: format is invalid`;
+    default:
+      return `${field}: ${error.message}`;
+  }
 }
 
 /**
- * Quick validation for API endpoints using unified validator
+ * Quick validation for API endpoints
  */
 function quickValidate(dreamData) {
   if (!dreamData || typeof dreamData !== 'object') {
     return { valid: false, error: 'Invalid dream data' };
   }
 
-  // Use unified validator for quick validation
-  const validationResult = unifiedValidator.validateDreamObject(dreamData, {
-    strictMode: false,
-    allowPartial: true,
-  });
+  const required = ['id', 'title', 'style'];
+  for (const field of required) {
+    if (!dreamData[field]) {
+      return { valid: false, error: `Missing required field: ${field}` };
+    }
+  }
 
-  if (!validationResult.valid) {
-    // Return first critical error
-    const criticalError = validationResult.errors.find(
-      (e) => e.severity === 'critical'
-    );
-    const firstError = criticalError || validationResult.errors[0];
-
-    return {
-      valid: false,
-      error: firstError
-        ? firstError.message || `${firstError.field}: ${firstError.error}`
-        : 'Validation failed',
-    };
+  const validStyles = [
+    'ethereal',
+    'cyberpunk',
+    'surreal',
+    'fantasy',
+    'nightmare',
+  ];
+  if (!validStyles.includes(dreamData.style)) {
+    return { valid: false, error: `Invalid style: ${dreamData.style}` };
   }
 
   return { valid: true };
@@ -674,5 +716,4 @@ module.exports = {
   calculateComplexityScore,
   getComplexityRating,
   formatValidationError,
-  unifiedValidator, // Export unified validator for direct access
 };

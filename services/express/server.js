@@ -11,6 +11,7 @@ const parseRoutes = require('./routes/parse');
 const patchRoutes = require('./routes/patch');
 const exportRoutes = require('./routes/export');
 const healthRoutes = require('./routes/health');
+const sampleDreamsRoutes = require('./routes/sample-dreams');
 const { errorHandler } = require('./middleware/errorHandler');
 const { enhancedErrorHandler } = require('./middleware/errorHandler');
 
@@ -40,6 +41,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/api', parseRoutes);
 app.use('/api', patchRoutes);
 app.use('/api', exportRoutes);
+app.use('/api', sampleDreamsRoutes);
 app.use('/', healthRoutes);
 
 // API documentation route
@@ -55,6 +57,7 @@ app.get('/api', (req, res) => {
       'GET /api/dreams': 'List cached dreams',
       'GET /api/scene/:id': 'Get specific dream scene',
       'GET /api/samples': 'Get sample dreams',
+      'GET /api/sample-dreams/:filename': 'Get specific sample dream JSON file',
       'GET /health': 'Health check',
     },
     documentation: '/docs',
@@ -77,6 +80,7 @@ app.use((req, res) => {
       'POST /api/export',
       'GET /api/dreams',
       'GET /api/samples',
+      'GET /api/sample-dreams/:filename',
     ],
   });
 });

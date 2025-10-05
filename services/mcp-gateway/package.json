@@ -30,6 +30,7 @@
     "async": "^3.2.6",
     "axios": "^1.12.2",
     "body-parser": "^2.2.0",
+    "compromise": "^14.14.4",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",

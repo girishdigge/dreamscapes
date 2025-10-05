@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MaterialSystem Tests Only</title>
+    <style>
+      body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+        background: #1e1e1e;
+        color: #d4d4d4;
+      }
+      h1 {
+        color: #4ec9b0;
+      }
+      .test-result {
+        padding: 8px;
+        margin: 5px 0;
+        border-radius: 3px;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 13px;
+      }
+      .test-result.pass {
+        background: #1e4620;
+        border-left: 3px solid #4caf50;
+      }
+      .test-result.fail {
+        background: #4a1e1e;
+        border-left: 3px solid #f44336;
+      }
+      .summary {
+        background: #2d2d30;
+        border: 2px solid #4ec9b0;
+        border-radius: 5px;
+        padding: 20px;
+        margin: 20px 0;
+        font-size: 18px;
+      }
+      .passed {
+        color: #4caf50;
+      }
+      .failed {
+        color: #f44336;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🧪 MaterialSystem Unit Tests</h1>
+    <div id="results"></div>
+    <div id="summary" class="summary"></div>
+
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <!-- Engine modules -->
+    <script src="../MaterialSystem.js"></script>
+
+    <!-- Test file -->
+    <script src="./MaterialSystem.test.js"></script>
+
+    <script>
+      async function runTests() {
+        const resultsDiv = document.getElementById('results');
+        const summaryDiv = document.getElementById('summary');
+
+        try {
+          const tests = new MaterialSystemTests();
+          const results = await tests.runAll();
+
+          // Display results
+          results.results.forEach((result) => {
+            const div = document.createElement('div');
+            div.className = `test-result ${
+              result.status === 'PASS' ? 'pass' : 'fail'
+            }`;
+            div.textContent = `${result.status === 'PASS' ? '✓' : '✗'} ${
+              result.test
+            }`;
+
+            if (result.error) {
+              const errorDiv = document.createElement('div');
+              errorDiv.style.color = '#f48771';
+              errorDiv.style.marginLeft = '20px';
+              errorDiv.style.fontSize = '12px';
+              errorDiv.textContent = result.error;
+              div.appendChild(errorDiv);
+            }
+
+            resultsDiv.appendChild(div);
+          });
+
+          // Display summary
+          summaryDiv.innerHTML = `
+            <strong>Test Results:</strong><br>
+            Total: ${results.passed + results.failed} |
+            <span class="passed">Passed: ${results.passed}</span> |
+            <span class="failed">Failed: ${results.failed}</span>
+          `;
+
+          if (results.failed === 0) {
+            summaryDiv.innerHTML += '<br><br>🎉 All tests passed!';
+          }
+        } catch (error) {
+          resultsDiv.innerHTML = `<div class="test-result fail">Error running tests: ${error.message}</div>`;
+          summaryDiv.innerHTML = `<span class="failed">Test execution failed</span>`;
+        }
+      }
+
+      // Run tests on load
+      window.addEventListener('load', runTests);
+    </script>
+  </body>
+</html>

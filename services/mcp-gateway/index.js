@@ -39,6 +39,9 @@ const ErrorResponseBuilder = require('./utils/ErrorResponseBuilder');
 // Import extraction metrics collector
 const ExtractionMetricsCollector = require('./utils/ExtractionMetricsCollector');
 
+// Import scene normalizer for render-safe output
+const SceneNormalizer = require('./utils/SceneNormalizer');
+
 // Import enhanced validation and repair system
 const { ValidationPipeline } = require('./engine');
 
@@ -50,6 +53,10 @@ const { validationMonitor } = require('../../shared');
 // Import enhanced caching system
 const { getCacheService } = require('./services/cacheService');
 const cacheRoutes = require('./routes/cache');
+
+// Import Creative Dream Pipeline for enhancement
+const CreativeDreamPipeline = require('./integration/CreativeDreamPipeline');
+const PipelineConfig = require('./integration/PipelineConfig');
 
 // Import new enhanced routes
 const providerRoutes = require('./routes/providers');
@@ -1823,6 +1830,93 @@ app.post(
       entityCount: finalContent.entities?.length || 0,
     });
 
+    // ============================================================
+    // CREATIVE ENHANCEMENT: Apply Creative Dream Pipeline
+    // ============================================================
+    // Enhance the AI-generated dream with motion, events, and camera
+    // This adds cinematic intelligence on top of the AI-generated structures
+    if (options.enhanceWithCreativePipeline !== false && text) {
+      try {
+        const enhanceStart = Date.now();
+
+        // Initialize Creative Pipeline with performance preset for speed
+        const creativePipeline = new CreativeDreamPipeline(
+          PipelineConfig.PERFORMANCE
+        );
+
+        // Process the original text prompt to get creative enhancements
+        const creativeResult = await creativePipeline.process(text);
+
+        // Merge creative enhancements into the AI-generated dream
+        if (creativeResult && creativeResult.entities) {
+          // Add motion data to entities if they match
+          if (finalContent.entities && Array.isArray(finalContent.entities)) {
+            finalContent.entities = finalContent.entities.map((entity) => {
+              // Try to find matching creative entity
+              const creativeEntity = creativeResult.entities.find(
+                (ce) =>
+                  ce.name
+                    .toLowerCase()
+                    .includes(entity.name?.toLowerCase() || '') ||
+                  entity.name?.toLowerCase().includes(ce.name.toLowerCase())
+              );
+
+              if (creativeEntity && creativeEntity.motion) {
+                return {
+                  ...entity,
+                  motion: creativeEntity.motion,
+                  path: creativeEntity.path,
+                  creativeEnhancement: true,
+                };
+              }
+              return entity;
+            });
+          }
+
+          // Add camera shots if available
+          if (creativeResult.camera && creativeResult.camera.length > 0) {
+            finalContent.camera = creativeResult.camera;
+          }
+
+          // Add events if available
+          if (creativeResult.events && creativeResult.events.length > 0) {
+            finalContent.events = creativeResult.events;
+          }
+
+          // Add creative metadata
+          finalContent.metadata = {
+            ...finalContent.metadata,
+            creativeEnhancement: {
+              applied: true,
+              processingTime: Date.now() - enhanceStart,
+              entitiesEnhanced:
+                finalContent.entities?.filter((e) => e.creativeEnhancement)
+                  .length || 0,
+              cameraShots: creativeResult.camera?.length || 0,
+              events: creativeResult.events?.length || 0,
+              confidence: creativeResult.metadata?.confidence || 1.0,
+            },
+          };
+
+          logger.info('Creative enhancement applied', {
+            source,
+            entitiesEnhanced:
+              finalContent.entities?.filter((e) => e.creativeEnhancement)
+                .length || 0,
+            cameraShots: creativeResult.camera?.length || 0,
+            events: creativeResult.events?.length || 0,
+            enhancementTime: Date.now() - enhanceStart,
+          });
+        }
+      } catch (enhanceError) {
+        logger.warn('Creative enhancement failed, continuing without it', {
+          error: enhanceError.message,
+          source,
+        });
+        // Continue without enhancement - not critical
+      }
+    }
+
     // Build appropriate response based on whether repair was applied
     let finalResponse;
 
@@ -1879,6 +1973,54 @@ app.post(
         cacheHit: false,
         validation: finalContent.metadata?.validation,
       });
+    }
+
+    // ============================================================
+    // RENDER-READY OUTPUT: Full normalization + interpolation
+    // ============================================================
+    // Transform into complete render-ready format with:
+    // - Per-frame entity motion interpolation
+    // - Per-frame camera paths with orbit calculations
+    // - Unified camera timeline (no cinematography duplication)
+    // - Environment timeline for lighting/fog changes
+    // - All vectors as [x,y,z] arrays (no {x,y,z} objects)
+    // - Scene duration computed from camera shots
+    // - Seeded deterministic randomness
+    try {
+      if (finalResponse.success && finalResponse.data) {
+        // Step 1: Normalize (clean up inconsistencies)
+        const normalizedScene = SceneNormalizer.normalize(finalResponse.data);
+
+        // Step 2: Convert to render-ready format (full interpolation)
+        const renderReadyScene =
+          SceneNormalizer.toRenderableFormat(normalizedScene);
+
+        finalResponse.data = renderReadyScene;
+
+        logger.info('Scene converted to render-ready format', {
+          source,
+          sceneDuration: renderReadyScene.sceneDuration,
+          entitiesWithFrames: renderReadyScene.entities.length,
+          totalEntityFrames: renderReadyScene.entities.reduce(
+            (sum, e) => sum + (e.frames?.length || 0),
+            0
+          ),
+          cameraShots: renderReadyScene.camera.length,
+          totalCameraFrames: renderReadyScene.camera.reduce(
+            (sum, c) => sum + (c.frames?.length || 0),
+            0
+          ),
+          structuresCount: renderReadyScene.structures.length,
+          hasEnvironmentTimeline:
+            renderReadyScene.environment.timeline?.length > 0,
+        });
+      }
+    } catch (normalizeError) {
+      logger.warn('Scene normalization failed, returning original', {
+        error: normalizeError.message,
+        source,
+      });
+      // Continue with original response if normalization fails
     }
 
     res.json(finalResponse);

@@ -1,7 +1,9 @@
 {
   "dependencies": {
+    "@react-three/postprocessing": "^3.0.4",
     "mkdirp": "^3.0.1",
     "morgan": "^1.10.1",
+    "postprocessing": "^6.37.8",
     "puppeteer-core": "^24.23.0",
     "rimraf": "^6.0.1"
   }

@@ -61,6 +61,12 @@
         "glow": 0.7,
         "size": 2.0,
         "color": "#FFB6D9"
+      },
+      "motion": {
+        "type": "wander",
+        "center": [0, 10, 0],
+        "radius": 40,
+        "frequency": 0.5
       }
     },
     {
@@ -72,37 +78,58 @@
         "glow": 0.5,
         "size": 1.0,
         "color": "#FFFFFF"
+      },
+      "motion": {
+        "type": "wander",
+        "attachTo": "house_trunk",
+        "offset": [0, 10, 0],
+        "radius": 20,
+        "frequency": 0.3
       }
     }
   ],
-  "cinematography": {
-    "durationSec": 35,
-    "shots": [
-      {
-        "type": "establish",
-        "duration": 8,
-        "startPos": [50, 30, 50],
-        "endPos": [50, 30, 50]
-      },
-      {
-        "type": "orbit",
-        "target": "house_trunk",
-        "duration": 12
-      },
-      {
-        "type": "flythrough",
-        "duration": 10,
-        "startPos": [30, 15, 30],
-        "endPos": [-30, 25, -20]
-      },
-      {
-        "type": "pull_back",
-        "duration": 5,
-        "startPos": [10, 10, 10],
-        "endPos": [60, 40, 60]
-      }
-    ]
-  },
+  "camera": [
+    {
+      "startTime": 0,
+      "duration": 8,
+      "position": [50, 30, 50],
+      "target": "house_trunk",
+      "fov": 70,
+      "movement": "establish",
+      "easing": "linear",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 8,
+      "duration": 12,
+      "position": [60, 35, 60],
+      "target": "house_trunk",
+      "fov": 65,
+      "movement": "orbit",
+      "easing": "linear",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 20,
+      "duration": 10,
+      "position": [30, 15, 30],
+      "lookAt": [-30, 25, -20],
+      "fov": 60,
+      "movement": "flythrough",
+      "easing": "ease-in-out",
+      "transition": "smooth"
+    },
+    {
+      "startTime": 30,
+      "duration": 5,
+      "position": [60, 40, 60],
+      "lookAt": [0, 10, 0],
+      "fov": 75,
+      "movement": "pull_back",
+      "easing": "ease-out",
+      "transition": "smooth"
+    }
+  ],
   "render": {
     "res": [1920, 1080],
     "fps": 30,

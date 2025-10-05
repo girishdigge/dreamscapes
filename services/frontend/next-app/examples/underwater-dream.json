@@ -1,0 +1,135 @@
+{
+  "id": "underwater_dream_example",
+  "title": "Underwater Dream",
+  "description": "A surreal underwater scene with cool color grading and handheld camera",
+  "style": "surreal",
+  "environment": {
+    "preset": "city",
+    "fog": true
+  },
+  "render": {
+    "qualityPreset": "balanced",
+    "res": [1920, 1080],
+    "fps": 30,
+    "quality": "medium",
+    "customQuality": {
+      "adaptiveQuality": true,
+      "targetFPS": 30,
+      "postProcessing": {
+        "enabled": true,
+        "quality": "medium",
+        "effects": {
+          "colorGrading": {
+            "enabled": true,
+            "exposure": 0.9,
+            "contrast": 0.95,
+            "saturation": 1.2,
+            "temperature": -20
+          },
+          "bloom": {
+            "enabled": true,
+            "intensity": 0.3,
+            "threshold": 0.95,
+            "radius": 0.5
+          },
+          "vignette": {
+            "enabled": true,
+            "darkness": 0.4,
+            "offset": 0.5
+          },
+          "filmGrain": {
+            "enabled": true,
+            "intensity": 0.03
+          }
+        }
+      }
+    }
+  },
+  "cinematography": {
+    "durationSec": 20,
+    "shots": [
+      {
+        "type": "handheld",
+        "startTime": 0,
+        "duration": 20,
+        "position": [0, 20, 40],
+        "lookAt": [0, 10, 0],
+        "shake": 0.3,
+        "fov": 45,
+        "easing": "ease-in-out"
+      }
+    ]
+  },
+  "structures": [
+    {
+      "id": "coral_1",
+      "type": "tree",
+      "position": [-10, 0, 0],
+      "scale": [3, 4, 3],
+      "color": "#FF6B9D",
+      "material": {
+        "metalness": 0.2,
+        "roughness": 0.8,
+        "emissive": "#FF6B9D",
+        "emissiveIntensity": 0.2
+      }
+    },
+    {
+      "id": "coral_2",
+      "type": "tree",
+      "position": [15, 0, -5],
+      "scale": [2, 5, 2],
+      "color": "#4ECDC4",
+      "material": {
+        "metalness": 0.2,
+        "roughness": 0.8,
+        "emissive": "#4ECDC4",
+        "emissiveIntensity": 0.2
+      }
+    },
+    {
+      "id": "rock_1",
+      "type": "sphere",
+      "position": [0, -2, 0],
+      "scale": [8, 2, 8],
+      "color": "#5D4E37",
+      "material": {
+        "metalness": 0.1,
+        "roughness": 0.95
+      }
+    }
+  ],
+  "entities": [
+    {
+      "id": "fish_school",
+      "type": "flock",
+      "subtype": "fish",
+      "count": 50,
+      "position": [0, 10, 0],
+      "spread": [20, 10, 20],
+      "color": "#FFD700",
+      "size": 0.3,
+      "motion": {
+        "type": "flock",
+        "speed": 2.0,
+        "separation": 1.5,
+        "alignment": 1.0,
+        "cohesion": 1.0
+      }
+    },
+    {
+      "id": "bubbles",
+      "type": "particles",
+      "count": 100,
+      "position": [0, 0, 0],
+      "spread": [30, 5, 30],
+      "color": "#FFFFFF",
+      "size": 0.2,
+      "motion": {
+        "type": "float",
+        "speed": 1.0,
+        "direction": [0, 1, 0]
+      }
+    }
+  ]
+}

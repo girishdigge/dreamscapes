@@ -1,0 +1,103 @@
+{
+  "id": "cinematic_space_example",
+  "title": "Cinematic Space Journey",
+  "description": "A cinematic space scene with advanced camera work and post-processing",
+  "style": "ethereal",
+  "environment": {
+    "preset": "night",
+    "fog": false
+  },
+  "render": {
+    "qualityPreset": "cinematic",
+    "res": [1920, 1080],
+    "fps": 30,
+    "quality": "high"
+  },
+  "cinematography": {
+    "durationSec": 30,
+    "shots": [
+      {
+        "type": "establish",
+        "startTime": 0,
+        "duration": 5,
+        "position": [0, 100, 200],
+        "lookAt": [0, 0, 0],
+        "fov": 40,
+        "easing": "ease-in-out"
+      },
+      {
+        "type": "orbit",
+        "startTime": 5,
+        "duration": 15,
+        "position": [50, 30, 50],
+        "target": "ship_1",
+        "fov": 35,
+        "easing": "linear",
+        "speed": 1.5
+      },
+      {
+        "type": "dolly_in",
+        "startTime": 20,
+        "duration": 10,
+        "position": [20, 20, 40],
+        "lookAt": [0, 10, 0],
+        "fov": 35,
+        "easing": "ease-in",
+        "focusDistance": 0.1
+      }
+    ]
+  },
+  "structures": [
+    {
+      "id": "ship_1",
+      "type": "ship",
+      "position": [0, 10, 0],
+      "scale": [5, 5, 5],
+      "rotation": [0, 0, 0],
+      "color": "#4A90E2",
+      "material": {
+        "metalness": 0.9,
+        "roughness": 0.2,
+        "emissive": "#2E5C8A",
+        "emissiveIntensity": 0.3
+      }
+    },
+    {
+      "id": "planet_1",
+      "type": "sphere",
+      "position": [-50, 0, -100],
+      "scale": [20, 20, 20],
+      "color": "#8B4513",
+      "material": {
+        "metalness": 0.1,
+        "roughness": 0.9
+      }
+    },
+    {
+      "id": "star_1",
+      "type": "star",
+      "position": [80, 50, -50],
+      "scale": [3, 3, 3],
+      "color": "#FFD700",
+      "material": {
+        "emissive": "#FFD700",
+        "emissiveIntensity": 2.0
+      }
+    }
+  ],
+  "entities": [
+    {
+      "id": "asteroid_field",
+      "type": "particles",
+      "count": 200,
+      "position": [0, 0, -50],
+      "spread": [100, 50, 100],
+      "color": "#808080",
+      "size": 0.5,
+      "motion": {
+        "type": "drift",
+        "speed": 0.5
+      }
+    }
+  ]
+}

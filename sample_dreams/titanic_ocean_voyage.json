@@ -1,0 +1,274 @@
+{
+  "id": "550e8400-e29b-41d4-a716-446655440011",
+  "title": "🚢 Titanic Ocean Voyage at Dawn",
+  "style": "ethereal",
+  "created": "2025-01-15T14:00:00.000Z",
+  "source": "sample",
+  "structures": [
+    {
+      "id": "ocean_surface",
+      "type": "plane",
+      "pos": [0, 0, 0],
+      "scale": 500.0,
+      "rotation": [0, 0, 0],
+      "features": ["reflective", "animated"],
+      "material": {
+        "color": "#1A4D6D",
+        "metalness": 0.9,
+        "roughness": 0.1,
+        "normalMap": "water_normal",
+        "envMapIntensity": 1.0
+      },
+      "animation": {
+        "type": "wave",
+        "amplitude": 0.5,
+        "frequency": 0.3,
+        "speed": 0.5
+      }
+    },
+    {
+      "id": "ship_hull",
+      "type": "box",
+      "pos": [0, 8, 0],
+      "scale": [40, 12, 8],
+      "rotation": [0, 0, 0],
+      "features": ["solid"],
+      "material": {
+        "color": "#2C2C2C",
+        "metalness": 0.8,
+        "roughness": 0.3
+      },
+      "motion": {
+        "type": "move_along_path",
+        "path": [
+          [-150, 8, -50],
+          [-50, 8, -20],
+          [50, 8, 20],
+          [150, 8, 50]
+        ],
+        "duration": 25,
+        "easing": "linear"
+      }
+    },
+    {
+      "id": "ship_deck",
+      "type": "box",
+      "pos": [0, 16, 0],
+      "scale": [35, 4, 7],
+      "rotation": [0, 0, 0],
+      "features": ["solid"],
+      "material": {
+        "color": "#F5F5DC",
+        "metalness": 0.2,
+        "roughness": 0.7
+      },
+      "attachTo": "ship_hull"
+    },
+    {
+      "id": "ship_bridge",
+      "type": "box",
+      "pos": [10, 20, 0],
+      "scale": [8, 6, 6],
+      "rotation": [0, 0, 0],
+      "features": ["solid"],
+      "material": {
+        "color": "#FFFFFF",
+        "metalness": 0.3,
+        "roughness": 0.6
+      },
+      "attachTo": "ship_hull"
+    },
+    {
+      "id": "funnel_1",
+      "type": "cylinder",
+      "pos": [-5, 24, 0],
+      "scale": [2, 10, 2],
+      "rotation": [0, 0, 0],
+      "features": ["solid"],
+      "material": {
+        "color": "#D4AF37",
+        "metalness": 0.7,
+        "roughness": 0.3
+      },
+      "attachTo": "ship_hull"
+    },
+    {
+      "id": "funnel_2",
+      "type": "cylinder",
+      "pos": [5, 24, 0],
+      "scale": [2, 10, 2],
+      "rotation": [0, 0, 0],
+      "features": ["solid"],
+      "material": {
+        "color": "#D4AF37",
+        "metalness": 0.7,
+        "roughness": 0.3
+      },
+      "attachTo": "ship_hull"
+    },
+    {
+      "id": "sun",
+      "type": "sphere",
+      "pos": [200, 80, -100],
+      "scale": 20.0,
+      "rotation": [0, 0, 0],
+      "features": ["emissive"],
+      "material": {
+        "color": "#FFE4B5",
+        "emissive": "#FFE4B5",
+        "emissiveIntensity": 2.0
+      }
+    }
+  ],
+  "entities": [
+    {
+      "id": "smoke_funnel_1",
+      "type": "particle_emitter",
+      "count": 80,
+      "params": {
+        "speed": 2.0,
+        "glow": 0.3,
+        "size": 3.0,
+        "color": "#808080",
+        "lifetime": 4.0,
+        "spread": 30,
+        "direction": [0, 1, 0.2]
+      },
+      "attachTo": "funnel_1",
+      "offset": [0, 5, 0]
+    },
+    {
+      "id": "smoke_funnel_2",
+      "type": "particle_emitter",
+      "count": 80,
+      "params": {
+        "speed": 2.0,
+        "glow": 0.3,
+        "size": 3.0,
+        "color": "#808080",
+        "lifetime": 4.0,
+        "spread": 30,
+        "direction": [0, 1, 0.2]
+      },
+      "attachTo": "funnel_2",
+      "offset": [0, 5, 0]
+    },
+    {
+      "id": "bow_wake",
+      "type": "particle_emitter",
+      "count": 150,
+      "params": {
+        "speed": 3.0,
+        "glow": 0.6,
+        "size": 1.5,
+        "color": "#FFFFFF",
+        "lifetime": 2.0,
+        "spread": 60,
+        "direction": [-1, 0, 0]
+      },
+      "attachTo": "ship_hull",
+      "offset": [-20, 2, 0]
+    },
+    {
+      "id": "seagulls",
+      "type": "flock",
+      "count": 12,
+      "params": {
+        "size": 0.8,
+        "color": "#FFFFFF",
+        "speed": 5.0,
+        "flightPattern": "circular",
+        "radius": 50
+      },
+      "motion": {
+        "type": "orbit",
+        "center": [0, 30, 0],
+        "radius": 60,
+        "duration": 20,
+        "axis": [0, 1, 0]
+      }
+    },
+    {
+      "id": "water_spray",
+      "type": "particle_emitter",
+      "count": 100,
+      "params": {
+        "speed": 4.0,
+        "glow": 0.7,
+        "size": 0.8,
+        "color": "#87CEEB",
+        "lifetime": 1.5,
+        "spread": 90,
+        "direction": [0, 1, 0]
+      },
+      "attachTo": "ship_hull",
+      "offset": [-20, 4, 4]
+    }
+  ],
+  "camera": [
+    {
+      "startTime": 0,
+      "duration": 8,
+      "position": [-100, 25, 80],
+      "target": "ship_hull",
+      "fov": 60,
+      "movement": "tracking",
+      "easing": "ease-in-out"
+    },
+    {
+      "startTime": 8,
+      "duration": 8,
+      "position": [50, 15, 40],
+      "target": "ship_hull",
+      "fov": 55,
+      "movement": "tracking",
+      "easing": "linear"
+    },
+    {
+      "startTime": 16,
+      "duration": 9,
+      "position": [100, 50, -60],
+      "lookAt": [0, 10, 0],
+      "fov": 70,
+      "movement": "cinematic_pan",
+      "easing": "ease-out"
+    }
+  ],
+  "events": [],
+  "environment": {
+    "preset": "ocean",
+    "fog": 0.15,
+    "fogColor": "#B0C4DE",
+    "skyColor": "#87CEEB",
+    "ambientLight": 0.6,
+    "skybox": "dawn_sky",
+    "lighting": {
+      "ambient": 0.6,
+      "directional": {
+        "intensity": 1.2,
+        "position": [200, 80, -100],
+        "color": "#FFE4B5",
+        "castShadow": true
+      },
+      "hemisphere": {
+        "skyColor": "#87CEEB",
+        "groundColor": "#1A4D6D",
+        "intensity": 0.5
+      }
+    }
+  },
+  "render": {
+    "res": [1920, 1080],
+    "fps": 30,
+    "quality": "high",
+    "duration": 25,
+    "shadows": true,
+    "reflections": true
+  },
+  "metadata": {
+    "seed": 43,
+    "originalText": "Majestic ocean liner sailing at dawn with seagulls and gentle waves",
+    "requestedStyle": "ethereal",
+    "version": "2.0.0"
+  }
+}

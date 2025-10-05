@@ -15,6 +15,8 @@ const modules = [
   'AnimationController.js',
   'CameraController.js',
   'AssetLibrary.js',
+  'StructureRenderer.js',
+  'EntityRenderer.js',
   'SceneRenderer.js',
 ];
 
