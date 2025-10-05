@@ -1,0 +1,82 @@
+{
+  "title": "Simple Space Scene",
+  "renderMode": "3d",
+  "style": "ethereal",
+  "quality": "medium",
+
+  "environment": {
+    "preset": "space",
+    "skybox": "galaxy",
+    "lighting": {
+      "ambient": 0.3,
+      "directional": {
+        "intensity": 0.8,
+        "position": [100, 100, 50],
+        "color": "#ffffff"
+      }
+    }
+  },
+
+  "structures": [
+    {
+      "id": "sun",
+      "type": "star",
+      "pos": [0, 0, 0],
+      "scale": 8,
+      "material": {
+        "color": "#ffff00",
+        "emissiveIntensity": 1.2
+      },
+      "features": ["emissive"]
+    },
+    {
+      "id": "planet1",
+      "type": "planet",
+      "pos": [30, 0, 0],
+      "scale": 4,
+      "material": {
+        "color": "#4488ff"
+      },
+      "animation": {
+        "type": "orbit",
+        "speed": 0.5,
+        "amplitude": 30
+      }
+    },
+    {
+      "id": "planet2",
+      "type": "planet",
+      "pos": [-40, 5, 0],
+      "scale": 3,
+      "material": {
+        "color": "#ff8844"
+      },
+      "animation": {
+        "type": "orbit",
+        "speed": 0.3,
+        "amplitude": 40
+      }
+    }
+  ],
+
+  "cinematography": {
+    "durationSec": 15,
+    "shots": [
+      {
+        "type": "establish",
+        "startTime": 0,
+        "duration": 5,
+        "position": [0, 30, 80],
+        "target": [0, 0, 0]
+      },
+      {
+        "type": "orbital",
+        "startTime": 5,
+        "duration": 10,
+        "target": "sun",
+        "distance": 60,
+        "speed": 0.5
+      }
+    ]
+  }
+}

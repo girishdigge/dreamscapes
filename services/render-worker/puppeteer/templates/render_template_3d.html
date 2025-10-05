@@ -1,0 +1,5091 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Dreamscapes 3D Render Template</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        height: 100%;
+        overflow: hidden;
+      }
+      #renderCanvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .debug {
+        position: absolute;
+        left: 8px;
+        top: 8px;
+        color: rgba(255, 255, 255, 0.9);
+        font-family: monospace;
+        font-size: 12px;
+        z-index: 100;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 8px;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="renderCanvas"></canvas>
+    <div class="debug" id="debugInfo"></div>
+
+    <!-- Three.js Library from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+    <script>
+      // 3D Rendering Engine
+      // Exposes:
+      //  - window.initWithDream(dream, width, height)
+      //  - window.seek(t)   // render to time t (seconds)
+      // Canvas is #renderCanvas
+
+      (function () {
+        console.log('Initializing 3D Render Template...');
+
+        // Check if Three.js is loaded
+        if (typeof THREE === 'undefined') {
+          console.error('Three.js failed to load from CDN');
+          document.getElementById('debugInfo').textContent =
+            'ERROR: Three.js failed to load';
+          return;
+        }
+
+        console.log('Three.js loaded successfully:', THREE.REVISION);
+
+        // Get canvas element
+        const canvas = document.getElementById('renderCanvas');
+        if (!canvas) {
+          console.error('Canvas element not found');
+          return;
+        }
+
+        // ========================================================================
+        // ENGINE MODULES - Embedded inline for browser execution
+        // ========================================================================
+
+        // ========================================================================
+        // TASK 10.2: Parameter Validation Utilities
+        // ========================================================================
+        /**
+         * Utility functions for validating and sanitizing parameters
+         */
+        const ParameterValidator = {
+          /**
+           * Validate and sanitize color value
+           * @param {*} color - Color value to validate
+           * @param {string} defaultColor - Default color if invalid
+           * @returns {string} Valid color hex string
+           */
+          validateColor(color, defaultColor = '#ffffff') {
+            if (!color) return defaultColor;
+
+            // If it's already a valid hex color
+            if (typeof color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(color)) {
+              return color;
+            }
+
+            // If it's a hex without #
+            if (typeof color === 'string' && /^[0-9A-Fa-f]{6}$/.test(color)) {
+              return '#' + color;
+            }
+
+            // If it's a number, convert to hex
+            if (typeof color === 'number') {
+              return '#' + color.toString(16).padStart(6, '0');
+            }
+
+            console.warn(
+              `Invalid color value: ${color}, using default: ${defaultColor}`
+            );
+            return defaultColor;
+          },
+
+          /**
+           * Validate and clamp numeric value to range
+           * @param {*} value - Value to validate
+           * @param {number} min - Minimum value
+           * @param {number} max - Maximum value
+           * @param {number} defaultValue - Default if invalid
+           * @returns {number} Valid clamped number
+           */
+          validateNumber(value, min, max, defaultValue) {
+            if (value === undefined || value === null) {
+              return defaultValue;
+            }
+
+            const num = Number(value);
+
+            if (isNaN(num)) {
+              console.warn(
+                `Invalid number value: ${value}, using default: ${defaultValue}`
+              );
+              return defaultValue;
+            }
+
+            // Clamp to range
+            const clamped = Math.max(min, Math.min(max, num));
+
+            if (clamped !== num) {
+              console.warn(
+                `Number ${num} clamped to range [${min}, ${max}]: ${clamped}`
+              );
+            }
+
+            return clamped;
+          },
+
+          /**
+           * Validate position array
+           * @param {*} pos - Position value to validate
+           * @param {Array} defaultPos - Default position [x, y, z]
+           * @returns {Array} Valid position array
+           */
+          validatePosition(pos, defaultPos = [0, 0, 0]) {
+            if (!pos) return defaultPos;
+
+            if (!Array.isArray(pos)) {
+              console.warn(
+                `Invalid position (not an array): ${pos}, using default`
+              );
+              return defaultPos;
+            }
+
+            if (pos.length < 3) {
+              console.warn(
+                `Invalid position (length < 3): ${pos}, using default`
+              );
+              return defaultPos;
+            }
+
+            // Validate each component is a number
+            const validated = pos.slice(0, 3).map((val, idx) => {
+              const num = Number(val);
+              if (isNaN(num)) {
+                console.warn(
+                  `Invalid position component at index ${idx}: ${val}, using 0`
+                );
+                return 0;
+              }
+              return num;
+            });
+
+            return validated;
+          },
+
+          /**
+           * Validate animation parameters
+           * @param {Object} animation - Animation specification
+           * @returns {Object} Validated animation parameters
+           */
+          validateAnimation(animation) {
+            if (!animation || typeof animation !== 'object') {
+              return null;
+            }
+
+            return {
+              type: animation.type || 'orbit',
+              speed: this.validateNumber(animation.speed, 0.1, 10, 1.0),
+              amplitude: this.validateNumber(
+                animation.amplitude,
+                0.1,
+                100,
+                1.0
+              ),
+              axis: ['x', 'y', 'z'].includes(animation.axis)
+                ? animation.axis
+                : 'y',
+            };
+          },
+
+          /**
+           * Validate material parameters
+           * @param {Object} material - Material specification
+           * @returns {Object} Validated material parameters
+           */
+          validateMaterial(material) {
+            if (!material || typeof material !== 'object') {
+              return {
+                color: '#ffffff',
+                opacity: 1.0,
+                metalness: 0.5,
+                roughness: 0.5,
+                emissiveIntensity: 0.0,
+              };
+            }
+
+            return {
+              color: this.validateColor(material.color, '#ffffff'),
+              opacity: this.validateNumber(material.opacity, 0, 1, 1.0),
+              metalness: this.validateNumber(material.metalness, 0, 1, 0.5),
+              roughness: this.validateNumber(material.roughness, 0, 1, 0.5),
+              emissiveIntensity: this.validateNumber(
+                material.emissiveIntensity,
+                0,
+                2,
+                0.0
+              ),
+              transmission: this.validateNumber(
+                material.transmission,
+                0,
+                1,
+                0.0
+              ),
+            };
+          },
+
+          /**
+           * Validate scale value
+           * @param {*} scale - Scale value
+           * @param {number} defaultScale - Default scale
+           * @returns {number} Valid scale value
+           */
+          validateScale(scale, defaultScale = 1.0) {
+            return this.validateNumber(scale, 0.01, 1000, defaultScale);
+          },
+
+          /**
+           * Validate rotation array
+           * @param {*} rotation - Rotation value [x, y, z] in radians
+           * @param {Array} defaultRotation - Default rotation
+           * @returns {Array} Valid rotation array
+           */
+          validateRotation(rotation, defaultRotation = [0, 0, 0]) {
+            if (!rotation) return defaultRotation;
+
+            if (!Array.isArray(rotation)) {
+              console.warn(
+                `Invalid rotation (not an array): ${rotation}, using default`
+              );
+              return defaultRotation;
+            }
+
+            if (rotation.length < 3) {
+              console.warn(
+                `Invalid rotation (length < 3): ${rotation}, using default`
+              );
+              return defaultRotation;
+            }
+
+            // Validate each component is a number
+            const validated = rotation.slice(0, 3).map((val, idx) => {
+              const num = Number(val);
+              if (isNaN(num)) {
+                console.warn(
+                  `Invalid rotation component at index ${idx}: ${val}, using 0`
+                );
+                return 0;
+              }
+              return num;
+            });
+
+            return validated;
+          },
+
+          /**
+           * Validate particle count
+           * @param {*} count - Particle count
+           * @param {number} maxCount - Maximum allowed count
+           * @param {number} defaultCount - Default count
+           * @returns {number} Valid particle count
+           */
+          validateParticleCount(count, maxCount, defaultCount = 100) {
+            return Math.floor(
+              this.validateNumber(count, 1, maxCount, defaultCount)
+            );
+          },
+        };
+
+        // ========================================================================
+        // MaterialSystem
+        // ========================================================================
+        /**
+         * MaterialSystem - Advanced material creation and shader management
+         * Creates PBR materials, custom shaders, and skyboxes
+         */
+
+        class MaterialSystem {
+          constructor(options = {}) {
+            this.options = options;
+            this.materialCache = new Map();
+            this.textureCache = new Map();
+            this.textureLoader = new THREE.TextureLoader();
+            this.shaderMaterials = new Set(); // Track materials with uniforms to update
+          }
+
+          // ============================================================================
+          // TASK 4.1: Material Caching and Texture Loading
+          // ============================================================================
+
+          /**
+           * Get cached material or create new one
+           * @param {string} key - Cache key
+           * @param {Function} createFn - Function to create material if not cached
+           * @returns {THREE.Material} - Cached or new material
+           */
+          getCachedMaterial(key, createFn) {
+            if (!this.materialCache.has(key)) {
+              this.materialCache.set(key, createFn());
+            }
+            return this.materialCache.get(key);
+          }
+
+          /**
+           * Load texture with caching
+           * @param {string} url - Texture URL
+           * @returns {THREE.Texture} - Loaded texture
+           */
+          loadTexture(url) {
+            if (!this.textureCache.has(url)) {
+              const texture = this.textureLoader.load(url);
+              this.textureCache.set(url, texture);
+            }
+            return this.textureCache.get(url);
+          }
+
+          /**
+           * Dispose all cached materials and textures
+           */
+          dispose() {
+            this.materialCache.forEach((material) => material.dispose());
+            this.materialCache.clear();
+            this.textureCache.forEach((texture) => texture.dispose());
+            this.textureCache.clear();
+            this.shaderMaterials.clear();
+          }
+
+          // ============================================================================
+          // TASK 4.2: Skybox Materials with Custom Shaders
+          // ============================================================================
+
+          /**
+           * Create galaxy skybox with spiral arms and stars (GLSL shader)
+           * @returns {THREE.ShaderMaterial} - Galaxy skybox material
+           */
+          createGalaxySkybox() {
+            const vertexShader = `
+      // Galaxy Skybox Vertex Shader
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+
+            const fragmentShader = `
+      // Galaxy Skybox Fragment Shader
+      uniform float time;
+      varying vec3 vWorldPosition;
+
+      float random(vec2 st) {
+        return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+      }
+
+      void main() {
+        vec3 direction = normalize(vWorldPosition);
+        float angle = atan(direction.x, direction.z);
+        float radius = length(direction.xz);
+        
+        // Spiral arms pattern
+        float spiral = sin(angle * 3.0 + radius * 10.0 + time * 0.1) * 0.5 + 0.5;
+        
+        // Star field
+        vec2 starCoord = direction.xy * 100.0;
+        float stars = step(0.99, random(floor(starCoord)));
+        
+        // Nebula base color (purple/blue gradient)
+        vec3 nebulaColor = mix(vec3(0.1, 0.05, 0.2), vec3(0.8, 0.4, 0.9), spiral * 0.3);
+        
+        // Add stars
+        vec3 color = nebulaColor + stars * vec3(1.0, 0.9, 0.8);
+        
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+            const material = new THREE.ShaderMaterial({
+              vertexShader,
+              fragmentShader,
+              uniforms: {
+                time: { value: 0.0 },
+              },
+              side: THREE.BackSide,
+              depthWrite: false,
+            });
+
+            this.shaderMaterials.add(material);
+            return material;
+          }
+
+          /**
+           * Create nebula skybox with volumetric clouds (GLSL shader)
+           * @returns {THREE.ShaderMaterial} - Nebula skybox material
+           */
+          createNebulaSkybox() {
+            const vertexShader = `
+      // Nebula Skybox Vertex Shader
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+
+            const fragmentShader = `
+      // Nebula Skybox Fragment Shader
+      uniform float time;
+      varying vec3 vWorldPosition;
+
+      float noise(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        
+        float n = i.x + i.y * 57.0 + i.z * 113.0;
+        return mix(
+          mix(
+            mix(fract(sin(n) * 43758.5453), fract(sin(n + 1.0) * 43758.5453), f.x),
+            mix(fract(sin(n + 57.0) * 43758.5453), fract(sin(n + 58.0) * 43758.5453), f.x),
+            f.y
+          ),
+          mix(
+            mix(fract(sin(n + 113.0) * 43758.5453), fract(sin(n + 114.0) * 43758.5453), f.x),
+            mix(fract(sin(n + 170.0) * 43758.5453), fract(sin(n + 171.0) * 43758.5453), f.x),
+            f.y
+          ),
+          f.z
+        );
+      }
+
+      void main() {
+        vec3 direction = normalize(vWorldPosition);
+        
+        // Multi-octave noise for volumetric clouds
+        float n = 0.0;
+        n += noise(direction * 2.0 + time * 0.05) * 0.5;
+        n += noise(direction * 4.0 + time * 0.1) * 0.25;
+        n += noise(direction * 8.0 + time * 0.15) * 0.125;
+        
+        // Color gradient (pink to purple to blue)
+        vec3 color1 = vec3(0.8, 0.2, 0.5); // Pink
+        vec3 color2 = vec3(0.4, 0.1, 0.8); // Purple
+        vec3 color3 = vec3(0.1, 0.3, 0.9); // Blue
+        
+        vec3 color = mix(color1, color2, n);
+        color = mix(color, color3, n * n);
+        
+        // Add some brightness variation
+        color *= 0.5 + n * 0.5;
+        
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+            const material = new THREE.ShaderMaterial({
+              vertexShader,
+              fragmentShader,
+              uniforms: {
+                time: { value: 0.0 },
+              },
+              side: THREE.BackSide,
+              depthWrite: false,
+            });
+
+            this.shaderMaterials.add(material);
+            return material;
+          }
+
+          /**
+           * Create sunset skybox with gradient and sun
+           * @returns {THREE.ShaderMaterial} - Sunset skybox material
+           */
+          createSunsetSkybox() {
+            const vertexShader = `
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+
+            const fragmentShader = `
+      uniform float time;
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec3 direction = normalize(vWorldPosition);
+        
+        // Vertical gradient from horizon to sky
+        float height = direction.y;
+        
+        // Sunset colors
+        vec3 skyColor = vec3(0.1, 0.2, 0.4); // Dark blue
+        vec3 horizonColor = vec3(1.0, 0.6, 0.3); // Orange
+        vec3 sunColor = vec3(1.0, 0.9, 0.7); // Yellow-white
+        
+        // Gradient from sky to horizon
+        float gradientFactor = smoothstep(-0.2, 0.3, height);
+        vec3 color = mix(horizonColor, skyColor, gradientFactor);
+        
+        // Add sun
+        vec3 sunDirection = normalize(vec3(0.5, -0.1, -1.0));
+        float sunDot = dot(direction, sunDirection);
+        float sun = smoothstep(0.995, 0.998, sunDot);
+        float sunGlow = smoothstep(0.95, 0.998, sunDot) * 0.3;
+        
+        color = mix(color, sunColor, sun + sunGlow);
+        
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+            const material = new THREE.ShaderMaterial({
+              vertexShader,
+              fragmentShader,
+              uniforms: {
+                time: { value: 0.0 },
+              },
+              side: THREE.BackSide,
+              depthWrite: false,
+            });
+
+            this.shaderMaterials.add(material);
+            return material;
+          }
+
+          /**
+           * Create underwater skybox with caustics and bubbles
+           * @returns {THREE.ShaderMaterial} - Underwater skybox material
+           */
+          createUnderwaterSkybox() {
+            const vertexShader = `
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+
+            const fragmentShader = `
+      uniform float time;
+      varying vec3 vWorldPosition;
+
+      float random(vec2 st) {
+        return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+      }
+
+      void main() {
+        vec3 direction = normalize(vWorldPosition);
+        
+        // Base underwater blue-green color
+        vec3 deepColor = vec3(0.0, 0.1, 0.3); // Deep blue
+        vec3 shallowColor = vec3(0.0, 0.4, 0.6); // Lighter blue
+        
+        // Vertical gradient
+        float depth = direction.y * 0.5 + 0.5;
+        vec3 color = mix(deepColor, shallowColor, depth);
+        
+        // Caustics effect (animated light patterns)
+        vec2 causticsCoord = direction.xz * 5.0 + time * 0.1;
+        float caustics = sin(causticsCoord.x * 3.0) * cos(causticsCoord.y * 3.0);
+        caustics += sin(causticsCoord.x * 5.0 + time * 0.2) * cos(causticsCoord.y * 5.0 + time * 0.2);
+        caustics = caustics * 0.1 + 0.9;
+        
+        color *= caustics;
+        
+        // Add some bubbles
+        vec2 bubbleCoord = direction.xy * 50.0;
+        float bubbles = step(0.995, random(floor(bubbleCoord + time * 0.5)));
+        color += bubbles * vec3(0.3, 0.5, 0.7);
+        
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+            const material = new THREE.ShaderMaterial({
+              vertexShader,
+              fragmentShader,
+              uniforms: {
+                time: { value: 0.0 },
+              },
+              side: THREE.BackSide,
+              depthWrite: false,
+            });
+
+            this.shaderMaterials.add(material);
+            return material;
+          }
+
+          /**
+           * Create void skybox with deep space and stars
+           * @returns {THREE.ShaderMaterial} - Void skybox material
+           */
+          createVoidSkybox() {
+            const vertexShader = `
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+
+            const fragmentShader = `
+      uniform float time;
+      varying vec3 vWorldPosition;
+
+      float random(vec2 st) {
+        return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+      }
+
+      void main() {
+        vec3 direction = normalize(vWorldPosition);
+        
+        // Very dark space background
+        vec3 color = vec3(0.01, 0.01, 0.02);
+        
+        // Dense star field with varying sizes
+        vec2 starCoord1 = direction.xy * 100.0;
+        float stars1 = step(0.99, random(floor(starCoord1)));
+        
+        vec2 starCoord2 = direction.yz * 150.0;
+        float stars2 = step(0.995, random(floor(starCoord2))) * 0.7;
+        
+        vec2 starCoord3 = direction.xz * 200.0;
+        float stars3 = step(0.997, random(floor(starCoord3))) * 0.5;
+        
+        // Add stars with slight color variation
+        float starBrightness = stars1 + stars2 + stars3;
+        vec3 starColor = vec3(1.0, 0.95, 0.9);
+        color += starBrightness * starColor;
+        
+        // Add some distant nebula hints
+        float nebula = random(floor(direction.xy * 10.0)) * 0.05;
+        color += vec3(0.1, 0.05, 0.15) * nebula;
+        
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+            const material = new THREE.ShaderMaterial({
+              vertexShader,
+              fragmentShader,
+              uniforms: {
+                time: { value: 0.0 },
+              },
+              side: THREE.BackSide,
+              depthWrite: false,
+            });
+
+            this.shaderMaterials.add(material);
+            return material;
+          }
+
+          // ============================================================================
+          // TASK 4.3: Standard Material Creators
+          // ============================================================================
+
+          /**
+           * Create PBR material with metalness, roughness, transmission
+           * @param {Object} params - Material parameters
+           * @param {string} params.color - Base color (hex string)
+           * @param {number} params.metalness - Metalness value (0-1)
+           * @param {number} params.roughness - Roughness value (0-1)
+           * @param {number} params.transmission - Transmission value (0-1)
+           * @param {number} params.opacity - Opacity value (0-1)
+           * @returns {THREE.MeshStandardMaterial} - PBR material
+           */
+          createPBRMaterial(params = {}) {
+            // TASK 10.2: Use parameter validation
+            const validated = ParameterValidator.validateMaterial(params);
+
+            const material = new THREE.MeshStandardMaterial({
+              color: new THREE.Color(validated.color),
+              metalness: validated.metalness,
+              roughness: validated.roughness,
+              transparent:
+                validated.opacity < 1.0 || validated.transmission > 0,
+              opacity: validated.opacity,
+            });
+
+            // Add transmission if supported (Three.js r128+)
+            if (
+              validated.transmission > 0 &&
+              material.transmission !== undefined
+            ) {
+              material.transmission = validated.transmission;
+              material.thickness = ParameterValidator.validateNumber(
+                params.thickness,
+                0.1,
+                10,
+                0.5
+              );
+            }
+
+            return material;
+          }
+
+          /**
+           * Create emissive (glowing) material
+           * @param {Object} params - Material parameters
+           * @param {string} params.color - Base color (hex string)
+           * @param {string} params.emissiveColor - Emissive color (hex string)
+           * @param {number} params.emissiveIntensity - Glow intensity (0-1)
+           * @returns {THREE.MeshStandardMaterial} - Emissive material
+           */
+          createEmissiveMaterial(params = {}) {
+            // TASK 10.2: Use parameter validation
+            const color = ParameterValidator.validateColor(
+              params.color,
+              '#ffffff'
+            );
+            const emissiveColor = ParameterValidator.validateColor(
+              params.emissiveColor || params.color,
+              '#ffffff'
+            );
+            const emissiveIntensity = ParameterValidator.validateNumber(
+              params.emissiveIntensity,
+              0,
+              2,
+              0.5
+            );
+
+            const material = new THREE.MeshStandardMaterial({
+              color: new THREE.Color(color),
+              emissive: new THREE.Color(emissiveColor),
+              emissiveIntensity: emissiveIntensity,
+            });
+
+            return material;
+          }
+
+          /**
+           * Create transparent material for glass/crystal
+           * @param {Object} params - Material parameters
+           * @param {string} params.color - Base color (hex string)
+           * @param {number} params.opacity - Opacity value (0-1)
+           * @param {number} params.transmission - Transmission value (0-1)
+           * @param {number} params.roughness - Roughness value (0-1)
+           * @returns {THREE.MeshPhysicalMaterial} - Transparent material
+           */
+          createTransparentMaterial(params = {}) {
+            // TASK 10.2: Use parameter validation
+            const color = ParameterValidator.validateColor(
+              params.color,
+              '#ffffff'
+            );
+            const opacity = ParameterValidator.validateNumber(
+              params.opacity,
+              0,
+              1,
+              0.5
+            );
+            const transmission = ParameterValidator.validateNumber(
+              params.transmission,
+              0,
+              1,
+              0.9
+            );
+            const roughness = ParameterValidator.validateNumber(
+              params.roughness,
+              0,
+              1,
+              0.1
+            );
+            const thickness = ParameterValidator.validateNumber(
+              params.thickness,
+              0.1,
+              10,
+              0.5
+            );
+            const ior = ParameterValidator.validateNumber(
+              params.ior,
+              1.0,
+              2.5,
+              1.5
+            );
+
+            const material = new THREE.MeshPhysicalMaterial({
+              color: new THREE.Color(color),
+              metalness: 0.0,
+              roughness: roughness,
+              transparent: true,
+              opacity: opacity,
+              transmission: transmission,
+              thickness: thickness,
+              ior: ior, // Index of refraction
+            });
+
+            return material;
+          }
+
+          /**
+           * Create water material with animated normals
+           * @param {Object} params - Material parameters
+           * @param {string} params.color - Water color (hex string)
+           * @param {number} params.opacity - Opacity value (0-1)
+           * @returns {THREE.ShaderMaterial} - Water material
+           */
+          createWaterMaterial(params = {}) {
+            const color = params.color || '#0077be';
+            const opacity = params.opacity !== undefined ? params.opacity : 0.8;
+
+            const vertexShader = `
+      uniform float time;
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+
+      void main() {
+        vNormal = normalize(normalMatrix * normal);
+        
+        // Animated wave displacement
+        vec3 pos = position;
+        float wave = sin(pos.x * 0.1 + time) * cos(pos.y * 0.1 + time) * 2.0;
+        pos.z += wave;
+        
+        vPosition = pos;
+        
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      }
+    `;
+
+            const fragmentShader = `
+      uniform float time;
+      uniform vec3 waterColor;
+      uniform float opacity;
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+
+      void main() {
+        // Fresnel effect (more reflective at grazing angles)
+        vec3 viewDirection = normalize(cameraPosition - vPosition);
+        float fresnel = pow(1.0 - dot(viewDirection, vNormal), 3.0);
+        
+        // Base water color
+        vec3 color = waterColor;
+        
+        // Add some shimmer
+        float shimmer = sin(vPosition.x * 0.5 + time * 2.0) * cos(vPosition.y * 0.5 + time * 2.0);
+        shimmer = shimmer * 0.1 + 0.9;
+        
+        // Mix with white for highlights
+        color = mix(color, vec3(1.0), fresnel * 0.3);
+        color *= shimmer;
+        
+        gl_FragColor = vec4(color, opacity);
+      }
+    `;
+
+            const material = new THREE.ShaderMaterial({
+              vertexShader,
+              fragmentShader,
+              uniforms: {
+                time: { value: 0.0 },
+                waterColor: { value: new THREE.Color(color) },
+                opacity: { value: Math.max(0, Math.min(1, opacity)) },
+              },
+              transparent: true,
+              side: THREE.DoubleSide,
+            });
+
+            this.shaderMaterials.add(material);
+            return material;
+          }
+
+          // ============================================================================
+          // TASK 4.4: Shader Uniform Updates
+          // ============================================================================
+
+          /**
+           * Update shader uniforms for all animated materials
+           * @param {number} time - Current time in seconds
+           */
+          updateShaderUniforms(time) {
+            this.shaderMaterials.forEach((material) => {
+              if (material.uniforms && material.uniforms.time) {
+                material.uniforms.time.value = time;
+              }
+            });
+          }
+
+          /**
+           * Update specific material's shader uniforms
+           * @param {THREE.Material} material - Material with shader
+           * @param {number} time - Current time in seconds
+           */
+          updateMaterialUniforms(material, time) {
+            if (material.uniforms && material.uniforms.time) {
+              material.uniforms.time.value = time;
+            }
+          }
+        }
+
+        // ========================================================================
+        // AnimationController
+        // ========================================================================
+        /**
+         * AnimationController - Object animation and particle system updates
+         * Handles orbit, float, pulse, rotate animations and particle physics
+         */
+
+        class AnimationController {
+          constructor() {
+            this.animations = new Map();
+          }
+
+          /**
+           * Register an animation for an object
+           * @param {string} objectId - Object identifier
+           * @param {Object} animationSpec - Animation specification
+           */
+          addAnimation(objectId, animationSpec) {
+            this.animations.set(objectId, animationSpec);
+          }
+
+          /**
+           * Remove animation for an object
+           * @param {string} objectId - Object identifier
+           */
+          removeAnimation(objectId) {
+            this.animations.delete(objectId);
+          }
+
+          /**
+           * Update all animations for current time
+           * @param {number} time - Current time in seconds
+           * @param {Map} renderObjects - Map of object IDs to render objects
+           */
+          update(time, renderObjects) {
+            // Process all registered animations
+            for (const [objectId, animSpec] of this.animations) {
+              const renderObj = renderObjects.get(objectId);
+              if (!renderObj || !renderObj.mesh) continue;
+
+              const mesh = renderObj.mesh;
+
+              // TASK 10.2: Validate animation parameters
+              const validated = ParameterValidator.validateAnimation(animSpec);
+              if (!validated) {
+                console.warn(
+                  `Invalid animation spec for object ${objectId}, skipping`
+                );
+                continue;
+              }
+
+              const animType = validated.type;
+              const params = validated;
+
+              // Apply animation based on type
+              switch (animType) {
+                case 'orbit':
+                  this.applyOrbitAnimation(mesh, time, params);
+                  break;
+                case 'float':
+                  this.applyFloatAnimation(mesh, time, params);
+                  break;
+                case 'pulse':
+                  this.applyPulseAnimation(mesh, time, params);
+                  break;
+                case 'rotate':
+                  this.applyRotateAnimation(mesh, time, params);
+                  break;
+                default:
+                  console.warn(`Unknown animation type: ${animType}`);
+              }
+            }
+
+            // Update particle systems
+            for (const [objectId, renderObj] of renderObjects) {
+              if (renderObj.type === 'entity' && renderObj.particleSystem) {
+                this.updateParticleSystem(
+                  renderObj.particleSystem,
+                  time,
+                  renderObj.entity
+                );
+              }
+            }
+          }
+
+          /**
+           * Apply orbit animation (circular motion around center)
+           * @param {THREE.Object3D} object - Object to animate
+           * @param {number} time - Current time
+           * @param {Object} params - Animation parameters
+           */
+          applyOrbitAnimation(object, time, params) {
+            const speed = params.speed || 1.0;
+            const radius = params.amplitude || 10.0;
+            const angle = time * speed;
+
+            // Store original position if not already stored
+            if (!object.userData.originalPosition) {
+              object.userData.originalPosition = {
+                x: object.position.x,
+                y: object.position.y,
+                z: object.position.z,
+              };
+            }
+
+            const center = object.userData.originalPosition;
+
+            // Circular motion in XZ plane
+            object.position.x = center.x + Math.cos(angle) * radius;
+            object.position.z = center.z + Math.sin(angle) * radius;
+            object.position.y = center.y;
+          }
+
+          /**
+           * Apply float animation (sine wave vertical movement)
+           * @param {THREE.Object3D} object - Object to animate
+           * @param {number} time - Current time
+           * @param {Object} params - Animation parameters
+           */
+          applyFloatAnimation(object, time, params) {
+            const speed = params.speed || 1.0;
+            const amplitude = params.amplitude || 2.0;
+
+            // Store original position if not already stored
+            if (!object.userData.originalPosition) {
+              object.userData.originalPosition = {
+                x: object.position.x,
+                y: object.position.y,
+                z: object.position.z,
+              };
+            }
+
+            const center = object.userData.originalPosition;
+
+            // Sine wave vertical movement
+            const offset = Math.sin(time * speed) * amplitude;
+            object.position.y = center.y + offset;
+          }
+
+          /**
+           * Apply pulse animation (scale in/out rhythmically)
+           * @param {THREE.Object3D} object - Object to animate
+           * @param {number} time - Current time
+           * @param {Object} params - Animation parameters
+           */
+          applyPulseAnimation(object, time, params) {
+            const speed = params.speed || 1.0;
+            const amplitude = params.amplitude || 0.2;
+
+            // Store original scale if not already stored
+            if (!object.userData.originalScale) {
+              object.userData.originalScale = {
+                x: object.scale.x,
+                y: object.scale.y,
+                z: object.scale.z,
+              };
+            }
+
+            const baseScale = object.userData.originalScale;
+
+            // Rhythmic scale pulsing
+            const scaleFactor = 1.0 + Math.sin(time * speed) * amplitude;
+            object.scale.x = baseScale.x * scaleFactor;
+            object.scale.y = baseScale.y * scaleFactor;
+            object.scale.z = baseScale.z * scaleFactor;
+          }
+
+          /**
+           * Apply rotate animation (spin around own axis)
+           * @param {THREE.Object3D} object - Object to animate
+           * @param {number} time - Current time
+           * @param {Object} params - Animation parameters
+           */
+          applyRotateAnimation(object, time, params) {
+            const speed = params.speed || 1.0;
+            const axis = params.axis || 'y';
+
+            // Continuous rotation around specified axis
+            const angle = time * speed;
+
+            switch (axis) {
+              case 'x':
+                object.rotation.x = angle;
+                break;
+              case 'y':
+                object.rotation.y = angle;
+                break;
+              case 'z':
+                object.rotation.z = angle;
+                break;
+              default:
+                object.rotation.y = angle;
+            }
+          }
+
+          /**
+           * Update particle system positions and physics
+           * @param {THREE.Points} particleSystem - Particle system to update
+           * @param {number} time - Current time
+           * @param {Object} entitySpec - Entity specification with params
+           */
+          updateParticleSystem(particleSystem, time, entitySpec) {
+            if (!particleSystem || !particleSystem.geometry) return;
+
+            const positions = particleSystem.geometry.attributes.position;
+            if (!positions) return;
+
+            const params = entitySpec.params || {};
+            const speed = params.speed || 1.0;
+            const maxDistance = params.maxDistance || 100.0;
+            const gravity = params.gravity || 0.0;
+            const drag = params.drag || 0.0;
+
+            // Initialize velocities if not already done
+            if (!particleSystem.userData.velocities) {
+              particleSystem.userData.velocities = [];
+              for (let i = 0; i < positions.count; i++) {
+                particleSystem.userData.velocities.push({
+                  x: (Math.random() - 0.5) * speed,
+                  y: (Math.random() - 0.5) * speed,
+                  z: (Math.random() - 0.5) * speed,
+                });
+              }
+            }
+
+            // Store origin if not already stored
+            if (!particleSystem.userData.origin) {
+              particleSystem.userData.origin = {
+                x: particleSystem.position.x,
+                y: particleSystem.position.y,
+                z: particleSystem.position.z,
+              };
+            }
+
+            const velocities = particleSystem.userData.velocities;
+            const origin = particleSystem.userData.origin;
+            const deltaTime = 0.016; // Approximate frame time for smooth animation
+
+            // Update each particle
+            for (let i = 0; i < positions.count; i++) {
+              const idx = i * 3;
+
+              // Get current position
+              let x = positions.array[idx];
+              let y = positions.array[idx + 1];
+              let z = positions.array[idx + 2];
+
+              // Apply velocity
+              x += velocities[i].x * deltaTime;
+              y += velocities[i].y * deltaTime;
+              z += velocities[i].z * deltaTime;
+
+              // Apply gravity
+              velocities[i].y -= gravity * deltaTime;
+
+              // Apply drag
+              if (drag > 0) {
+                velocities[i].x *= 1.0 - drag * deltaTime;
+                velocities[i].y *= 1.0 - drag * deltaTime;
+                velocities[i].z *= 1.0 - drag * deltaTime;
+              }
+
+              // Check distance from origin
+              const dx = x - origin.x;
+              const dy = y - origin.y;
+              const dz = z - origin.z;
+              const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+              // Reset particle if it exceeds max distance
+              if (distance > maxDistance) {
+                x = origin.x + (Math.random() - 0.5) * 2;
+                y = origin.y + (Math.random() - 0.5) * 2;
+                z = origin.z + (Math.random() - 0.5) * 2;
+
+                // Reset velocity
+                velocities[i].x = (Math.random() - 0.5) * speed;
+                velocities[i].y = (Math.random() - 0.5) * speed;
+                velocities[i].z = (Math.random() - 0.5) * speed;
+              }
+
+              // Update position
+              positions.array[idx] = x;
+              positions.array[idx + 1] = y;
+              positions.array[idx + 2] = z;
+            }
+
+            // Mark positions as needing update
+            positions.needsUpdate = true;
+          }
+
+          /**
+           * Clear all animations
+           */
+          clear() {
+            this.animations.clear();
+          }
+        }
+
+        // ========================================================================
+        // CameraController
+        // ========================================================================
+        /**
+         * CameraController - Cinematic camera control and shot management
+         * Implements orbital, flythrough, establish, close-up, and pull-back shots
+         */
+
+        class CameraController {
+          constructor(camera, scene = null) {
+            this.camera = camera;
+            this.scene = scene;
+            this.shots = [];
+            this.currentShotIndex = -1;
+            this.defaultDistance = 100;
+            this.defaultTarget = { x: 0, y: 0, z: 0 };
+            this.useDefaultOrbital = false;
+
+            // Store initial camera position for reference
+            this.initialPosition = {
+              x: camera.position.x,
+              y: camera.position.y,
+              z: camera.position.z,
+            };
+          }
+
+          /**
+           * Set up camera shot sequence
+           * @param {Array} shots - Array of shot specifications
+           */
+          setupShots(shots) {
+            if (!shots || shots.length === 0) {
+              console.log(
+                'No cinematography specified, using default orbital view'
+              );
+              this.useDefaultOrbital = true;
+              this.shots = [];
+              this.currentShotIndex = -1;
+              return;
+            }
+
+            this.shots = shots;
+            this.currentShotIndex = -1;
+            this.useDefaultOrbital = false;
+
+            // Sort shots by startTime to ensure proper ordering
+            this.shots.sort((a, b) => (a.startTime || 0) - (b.startTime || 0));
+
+            console.log(
+              `CameraController: ${this.shots.length} shots configured`
+            );
+          }
+
+          /**
+           * Update camera position for current time
+           * @param {number} time - Current time in seconds
+           */
+          update(time) {
+            // If no cinematography specified, use default orbital view
+            if (this.useDefaultOrbital) {
+              this._applyDefaultOrbital(time);
+              return;
+            }
+
+            // If no shots configured, do nothing
+            if (!this.shots || this.shots.length === 0) {
+              return;
+            }
+
+            // Find the current shot based on time
+            const currentShot = this._getCurrentShot(time);
+
+            if (!currentShot) {
+              // No active shot, use default position
+              this._applyDefaultOrbital(time);
+              return;
+            }
+
+            // Calculate local time within the shot
+            const shotStartTime = currentShot.startTime || 0;
+            const shotDuration = currentShot.duration || 10;
+            const localTime = time - shotStartTime;
+            const progress = Math.min(1.0, localTime / shotDuration);
+
+            // Apply the appropriate shot type
+            this._applyShot(currentShot, progress, time);
+          }
+
+          /**
+           * Get the current shot for the given time
+           * @private
+           * @param {number} time - Current time in seconds
+           * @returns {Object|null} Current shot or null
+           */
+          _getCurrentShot(time) {
+            for (let i = 0; i < this.shots.length; i++) {
+              const shot = this.shots[i];
+              const startTime = shot.startTime || 0;
+              const duration = shot.duration || 10;
+              const endTime = startTime + duration;
+
+              if (time >= startTime && time < endTime) {
+                return shot;
+              }
+            }
+            return null;
+          }
+
+          /**
+           * Apply the appropriate shot based on type
+           * @private
+           * @param {Object} shot - Shot specification
+           * @param {number} progress - Progress through shot (0-1)
+           * @param {number} time - Current time in seconds
+           */
+          _applyShot(shot, progress, time) {
+            const shotType = shot.type || 'orbital';
+
+            switch (shotType) {
+              case 'orbital':
+                this.applyOrbitalShot(time, shot);
+                break;
+              case 'flythrough':
+                this.applyFlythroughShot(progress, shot);
+                break;
+              case 'establish':
+                this.applyEstablishShot(progress, shot);
+                break;
+              case 'close_up':
+                this.applyCloseUpShot(progress, shot);
+                break;
+              case 'pull_back':
+                this.applyPullBackShot(progress, shot);
+                break;
+              default:
+                console.warn(`Unknown shot type: ${shotType}, using orbital`);
+                this.applyOrbitalShot(time, shot);
+            }
+          }
+
+          /**
+           * Apply default orbital camera movement
+           * @private
+           * @param {number} time - Current time in seconds
+           */
+          _applyDefaultOrbital(time) {
+            const angle = time * 0.2; // Slow rotation
+            const distance = this.defaultDistance;
+
+            this.camera.position.x = Math.cos(angle) * distance;
+            this.camera.position.z = Math.sin(angle) * distance;
+            this.camera.position.y = distance * 0.5;
+
+            this.lookAt(this.defaultTarget);
+          }
+
+          /**
+           * Apply orbital shot (circle around target)
+           * @param {number} time - Current time in seconds
+           * @param {Object} params - Shot parameters
+           */
+          applyOrbitalShot(time, params) {
+            const target = this._resolveTarget(params.target);
+            const distance = params.distance || 50;
+            const speed = params.speed || 1.0;
+            const height = params.height || distance * 0.5;
+
+            // Calculate angle based on time and speed
+            const angle = time * speed * 0.5;
+
+            // Position camera in circular orbit
+            this.camera.position.x = target.x + Math.cos(angle) * distance;
+            this.camera.position.z = target.z + Math.sin(angle) * distance;
+            this.camera.position.y = target.y + height;
+
+            // Look at target
+            this.lookAt(target);
+          }
+
+          /**
+           * Apply flythrough shot (move along path)
+           * @param {number} progress - Progress through shot (0-1)
+           * @param {Object} params - Shot parameters
+           */
+          applyFlythroughShot(progress, params) {
+            const target = this._resolveTarget(params.target);
+
+            // Define path points (can be customized via params.path)
+            const path = params.path || [
+              { x: -100, y: 50, z: -100 },
+              { x: 0, y: 30, z: 0 },
+              { x: 100, y: 50, z: 100 },
+            ];
+
+            // Find current segment based on progress
+            const totalSegments = path.length - 1;
+            const segmentProgress = progress * totalSegments;
+            const segmentIndex = Math.floor(segmentProgress);
+            const localProgress = segmentProgress - segmentIndex;
+
+            // Get start and end points for current segment
+            const startPoint = path[Math.min(segmentIndex, path.length - 1)];
+            const endPoint = path[Math.min(segmentIndex + 1, path.length - 1)];
+
+            // Interpolate position with easing
+            const easedProgress = this._easeInOutCubic(localProgress);
+            const position = this.interpolatePosition(
+              startPoint,
+              endPoint,
+              easedProgress
+            );
+
+            // Set camera position
+            this.camera.position.set(position.x, position.y, position.z);
+
+            // Look at target
+            this.lookAt(target);
+          }
+
+          /**
+           * Apply establish shot (static wide view)
+           * @param {number} progress - Progress through shot (0-1)
+           * @param {Object} params - Shot parameters
+           */
+          applyEstablishShot(progress, params) {
+            const target = this._resolveTarget(params.target);
+            const distance = params.distance || 150;
+            const angle = params.angle || 0.785; // 45 degrees default
+            const height = params.height || distance * 0.6;
+
+            // Static wide angle position
+            this.camera.position.x = target.x + Math.cos(angle) * distance;
+            this.camera.position.z = target.z + Math.sin(angle) * distance;
+            this.camera.position.y = target.y + height;
+
+            // Look at target
+            this.lookAt(target);
+          }
+
+          /**
+           * Apply close-up shot (focus on object)
+           * @param {number} progress - Progress through shot (0-1)
+           * @param {Object} params - Shot parameters
+           */
+          applyCloseUpShot(progress, params) {
+            const target = this._resolveTarget(params.target);
+            const distance = params.distance || 15;
+            const angle = params.angle || 0;
+            const heightOffset = params.heightOffset || 5;
+
+            // Close position near target
+            this.camera.position.x = target.x + Math.cos(angle) * distance;
+            this.camera.position.z = target.z + Math.sin(angle) * distance;
+            this.camera.position.y = target.y + heightOffset;
+
+            // Look at target
+            this.lookAt(target);
+          }
+
+          /**
+           * Apply pull-back shot (zoom out reveal)
+           * @param {number} progress - Progress through shot (0-1)
+           * @param {Object} params - Shot parameters
+           */
+          applyPullBackShot(progress, params) {
+            const target = this._resolveTarget(params.target);
+            const startDistance = params.startDistance || 10;
+            const endDistance = params.endDistance || 100;
+            const angle = params.angle || 0.785;
+
+            // Interpolate distance with easing
+            const easedProgress = this._easeOutCubic(progress);
+            const distance =
+              startDistance + (endDistance - startDistance) * easedProgress;
+            const height = distance * 0.5;
+
+            // Position camera at interpolated distance
+            this.camera.position.x = target.x + Math.cos(angle) * distance;
+            this.camera.position.z = target.z + Math.sin(angle) * distance;
+            this.camera.position.y = target.y + height;
+
+            // Look at target
+            this.lookAt(target);
+          }
+
+          /**
+           * Smoothly interpolate between two positions
+           * @param {Object} start - Start position {x, y, z}
+           * @param {Object} end - End position {x, y, z}
+           * @param {number} t - Interpolation factor (0-1)
+           * @returns {Object} - Interpolated position
+           */
+          interpolatePosition(start, end, t) {
+            // Clamp t to [0, 1]
+            t = Math.max(0, Math.min(1, t));
+
+            return {
+              x: start.x + (end.x - start.x) * t,
+              y: start.y + (end.y - start.y) * t,
+              z: start.z + (end.z - start.z) * t,
+            };
+          }
+
+          /**
+           * Point camera at target
+           * @param {Array|Object} target - Target position [x,y,z] or {x,y,z}
+           */
+          lookAt(target) {
+            const targetPos = this._resolveTarget(target);
+
+            if (this.camera && this.camera.lookAt) {
+              this.camera.lookAt(targetPos.x, targetPos.y, targetPos.z);
+            }
+          }
+
+          /**
+           * Resolve target to a position object
+           * @private
+           * @param {Array|Object|string} target - Target as array, object, or structure ID
+           * @returns {Object} Position {x, y, z}
+           */
+          _resolveTarget(target) {
+            // If no target specified, use default
+            if (!target) {
+              return this.defaultTarget;
+            }
+
+            // If target is an array [x, y, z]
+            if (Array.isArray(target)) {
+              return {
+                x: target[0] || 0,
+                y: target[1] || 0,
+                z: target[2] || 0,
+              };
+            }
+
+            // If target is already an object {x, y, z}
+            if (typeof target === 'object' && target.x !== undefined) {
+              return {
+                x: target.x || 0,
+                y: target.y || 0,
+                z: target.z || 0,
+              };
+            }
+
+            // If target is a structure ID (string), try to find it in the scene
+            if (typeof target === 'string' && this.scene) {
+              const object = this.scene.getObjectByName(target);
+              if (object) {
+                return {
+                  x: object.position.x,
+                  y: object.position.y,
+                  z: object.position.z,
+                };
+              }
+              console.warn(
+                `Target structure "${target}" not found, using default`
+              );
+            }
+
+            // Fallback to default target
+            return this.defaultTarget;
+          }
+
+          /**
+           * Ease-in-out cubic easing function
+           * @private
+           * @param {number} t - Input value (0-1)
+           * @returns {number} Eased value (0-1)
+           */
+          _easeInOutCubic(t) {
+            return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+          }
+
+          /**
+           * Ease-out cubic easing function
+           * @private
+           * @param {number} t - Input value (0-1)
+           * @returns {number} Eased value (0-1)
+           */
+          _easeOutCubic(t) {
+            return 1 - Math.pow(1 - t, 3);
+          }
+
+          /**
+           * Ease-in cubic easing function
+           * @private
+           * @param {number} t - Input value (0-1)
+           * @returns {number} Eased value (0-1)
+           */
+          _easeInCubic(t) {
+            return t * t * t;
+          }
+
+          /**
+           * Linear easing (no easing)
+           * @private
+           * @param {number} t - Input value (0-1)
+           * @returns {number} Same value (0-1)
+           */
+          _linear(t) {
+            return t;
+          }
+
+          /**
+           * Apply easing function based on name
+           * @private
+           * @param {number} t - Input value (0-1)
+           * @param {string} easingType - Easing type name
+           * @returns {number} Eased value (0-1)
+           */
+          _applyEasing(t, easingType) {
+            switch (easingType) {
+              case 'ease_in':
+                return this._easeInCubic(t);
+              case 'ease_out':
+                return this._easeOutCubic(t);
+              case 'ease_in_out':
+                return this._easeInOutCubic(t);
+              case 'linear':
+              default:
+                return this._linear(t);
+            }
+          }
+
+          /**
+           * Clear all shots
+           */
+          clear() {
+            this.shots = [];
+            this.currentShotIndex = -1;
+          }
+        }
+
+        // ========================================================================
+        // AssetLibrary
+        // ========================================================================
+        /**
+         * AssetLibrary - Procedural 3D asset generation
+         * Creates geometry for 50+ structure types and entities
+         */
+
+        class AssetLibrary {
+          constructor(scene, options = {}) {
+            this.scene = scene;
+            this.options = options;
+            this.geometryCache = new Map();
+            this.materialCache = new Map();
+          }
+
+          /**
+           * Get quality-specific settings
+           * @private
+           * @param {string} setting - Setting name
+           * @returns {*} Setting value
+           */
+          _getQualitySetting(setting) {
+            const qualitySettings = {
+              draft: {
+                geometrySegments: 8,
+                maxParticles: 1000,
+              },
+              medium: {
+                geometrySegments: 16,
+                maxParticles: 5000,
+              },
+              high: {
+                geometrySegments: 32,
+                maxParticles: 10000,
+              },
+            };
+
+            const quality = this.options.quality || 'medium';
+            return (
+              qualitySettings[quality]?.[setting] ??
+              qualitySettings.medium[setting]
+            );
+          }
+
+          /**
+           * Create a structure (static 3D object)
+           * @param {Object} structure - Structure specification from dream JSON
+           * @returns {THREE.Mesh|THREE.Group} - Three.js object
+           */
+          createStructure(structure) {
+            // TASK 10.1: Add structure type error handling
+            // Validate structure object
+            if (!structure || typeof structure !== 'object') {
+              console.error(
+                'Invalid structure object provided, using generic fallback'
+              );
+              return this.createGenericStructure({
+                type: 'unknown',
+                material: {},
+              });
+            }
+
+            const type = structure.type?.toLowerCase() || 'unknown';
+            const structureId = structure.id || 'unknown';
+
+            // Log warning for unknown types
+            if (type === 'unknown' || !structure.type) {
+              console.warn(
+                `Structure ${structureId}: No type specified or type is 'unknown', using generic fallback`
+              );
+            }
+
+            try {
+              let mesh;
+
+              // Dispatcher for structure types
+              switch (type) {
+                // Celestial objects
+                case 'star':
+                  mesh = this.createStar(structure);
+                  break;
+                case 'planet':
+                  mesh = this.createPlanet(structure);
+                  break;
+                case 'galaxy':
+                  mesh = this.createGalaxy(structure);
+                  break;
+                case 'nebula':
+                  mesh = this.createNebula(structure);
+                  break;
+
+                // Natural elements
+                case 'water':
+                case 'ocean':
+                case 'sea':
+                  mesh = this.createWater(structure);
+                  break;
+                case 'fire':
+                  mesh = this.createFire(structure);
+                  break;
+                case 'cloud':
+                case 'clouds':
+                  mesh = this.createClouds(structure);
+                  break;
+                case 'mountain':
+                case 'mountains':
+                  mesh = this.createMountain(structure);
+                  break;
+
+                // Living beings
+                case 'horse':
+                  mesh = this.createHorse(structure);
+                  break;
+                case 'bird':
+                  mesh = this.createBird(structure);
+                  break;
+                case 'fish':
+                  mesh = this.createFish(structure);
+                  break;
+                case 'human':
+                case 'person':
+                  mesh = this.createHuman(structure);
+                  break;
+
+                // Architectural structures
+                case 'tower':
+                  mesh = this.createTower(structure);
+                  break;
+                case 'bridge':
+                  mesh = this.createBridge(structure);
+                  break;
+                case 'crystal':
+                  mesh = this.createCrystal(structure);
+                  break;
+
+                // Vehicles and objects
+                case 'ship':
+                case 'boat':
+                  mesh = this.createShip(structure);
+                  break;
+
+                // Fallback for unknown types
+                default:
+                  console.warn(
+                    `Structure ${structureId}: Unknown type "${type}", using generic fallback`
+                  );
+                  mesh = this.createGenericStructure(structure);
+                  break;
+              }
+
+              // Validate mesh was created
+              if (!mesh) {
+                console.error(
+                  `Structure ${structureId}: Failed to create mesh for type "${type}", using generic fallback`
+                );
+                mesh = this.createGenericStructure(structure);
+              }
+
+              // Apply transformations with error handling
+              if (mesh) {
+                try {
+                  this.applyTransformations(mesh, structure);
+                } catch (transformError) {
+                  console.error(
+                    `Structure ${structureId}: Error applying transformations:`,
+                    transformError
+                  );
+                  // Continue with default transformations
+                }
+
+                // Apply visual features if specified
+                if (
+                  structure.features &&
+                  Array.isArray(structure.features) &&
+                  structure.features.length > 0
+                ) {
+                  try {
+                    this.applyFeatures(mesh, structure.features, structure);
+                  } catch (featureError) {
+                    console.error(
+                      `Structure ${structureId}: Error applying features:`,
+                      featureError
+                    );
+                    // Continue without features
+                  }
+                }
+              }
+
+              return mesh;
+            } catch (error) {
+              console.error(
+                `Structure ${structureId}: Critical error creating structure of type "${type}":`,
+                error
+              );
+              // Return generic fallback as last resort
+              try {
+                return this.createGenericStructure(structure);
+              } catch (fallbackError) {
+                console.error(
+                  `Structure ${structureId}: Even generic fallback failed:`,
+                  fallbackError
+                );
+                // Return a minimal box as absolute last resort
+                const geometry = new THREE.BoxGeometry(10, 10, 10);
+                const material = new THREE.MeshBasicMaterial({
+                  color: 0x888888,
+                });
+                return new THREE.Mesh(geometry, material);
+              }
+            }
+          }
+
+          /**
+           * Create an entity (dynamic particle system or animated object)
+           * @param {Object} entity - Entity specification from dream JSON
+           * @returns {THREE.Points|THREE.Group} - Three.js object
+           */
+          createEntity(entity) {
+            // TASK 10.1: Add entity type error handling
+            // Validate entity object
+            if (!entity || typeof entity !== 'object') {
+              console.error('Invalid entity object provided, skipping');
+              return null;
+            }
+
+            const type = entity.type?.toLowerCase() || 'unknown';
+            const entityId = entity.id || 'unknown';
+
+            // Log warning for unknown types
+            if (type === 'unknown' || !entity.type) {
+              console.warn(
+                `Entity ${entityId}: No type specified or type is 'unknown', using particle_stream fallback`
+              );
+            }
+
+            try {
+              let object;
+
+              // Dispatcher for entity types
+              switch (type) {
+                case 'particle_stream':
+                  object = this.createParticleStream(entity);
+                  break;
+                case 'floating_orbs':
+                  object = this.createFloatingOrbs(entity);
+                  break;
+                case 'light_butterflies':
+                  object = this.createLightButterflies(entity);
+                  break;
+                case 'ship':
+                case 'boat':
+                  // Ships as entities create multiple instances
+                  object = this.createShipEntity(entity);
+                  break;
+
+                // Fallback for unknown types
+                default:
+                  console.warn(
+                    `Entity ${entityId}: Unknown type "${type}", using particle_stream fallback`
+                  );
+                  object = this.createParticleStream(entity);
+                  break;
+              }
+
+              // Validate object was created
+              if (!object) {
+                console.error(
+                  `Entity ${entityId}: Failed to create object for type "${type}"`
+                );
+                return null;
+              }
+
+              return object;
+            } catch (error) {
+              console.error(
+                `Entity ${entityId}: Critical error creating entity of type "${type}":`,
+                error
+              );
+              // Try to create a simple fallback particle system
+              try {
+                return this.createParticleStream({
+                  ...entity,
+                  count: 100,
+                  params: { color: '#ffffff', speed: 1.0, size: 1.0 },
+                });
+              } catch (fallbackError) {
+                console.error(
+                  `Entity ${entityId}: Even fallback particle system failed:`,
+                  fallbackError
+                );
+                return null;
+              }
+            }
+          }
+
+          /**
+           * Get cached geometry or create new one
+           * @param {string} key - Cache key
+           * @param {Function} createFn - Function to create geometry if not cached
+           * @returns {THREE.BufferGeometry} - Cached or new geometry
+           */
+          getCachedGeometry(key, createFn) {
+            if (!this.geometryCache.has(key)) {
+              this.geometryCache.set(key, createFn());
+            }
+            return this.geometryCache.get(key);
+          }
+
+          /**
+           * Get cached material or create new one
+           * @param {string} key - Cache key
+           * @param {Function} createFn - Function to create material if not cached
+           * @returns {THREE.Material} - Cached or new material
+           */
+          getCachedMaterial(key, createFn) {
+            if (!this.materialCache.has(key)) {
+              this.materialCache.set(key, createFn());
+            }
+            return this.materialCache.get(key);
+          }
+
+          /**
+           * Apply transformations (position, scale, rotation) to a mesh
+           * @param {THREE.Object3D} mesh - The mesh to transform
+           * @param {Object} structure - Structure specification with transform data
+           */
+          applyTransformations(mesh, structure) {
+            // TASK 10.2: Use parameter validation for transformations
+
+            // Apply position with validation
+            const position = ParameterValidator.validatePosition(
+              structure.pos,
+              [0, 0, 0]
+            );
+            mesh.position.set(position[0], position[1], position[2]);
+
+            // Apply scale with validation
+            const scale = ParameterValidator.validateScale(
+              structure.scale,
+              1.0
+            );
+            mesh.scale.set(scale, scale, scale);
+
+            // Apply rotation with validation
+            const rotation = ParameterValidator.validateRotation(
+              structure.rotation,
+              [0, 0, 0]
+            );
+            mesh.rotation.set(rotation[0], rotation[1], rotation[2]);
+
+            // Enable frustum culling for performance optimization
+            this._enableFrustumCulling(mesh);
+          }
+
+          /**
+           * Enable frustum culling for an object and all its children
+           * @private
+           * @param {THREE.Object3D} object - The object to enable culling for
+           */
+          _enableFrustumCulling(object) {
+            object.frustumCulled = true;
+
+            // Apply to all children recursively
+            if (object.children && object.children.length > 0) {
+              object.children.forEach((child) =>
+                this._enableFrustumCulling(child)
+              );
+            }
+          }
+
+          // ============================================================================
+          // CELESTIAL OBJECTS
+          // ============================================================================
+
+          /**
+           * Create a star with glowing sphere and corona effects
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Group} - Star with glow effects
+           */
+          createStar(structure) {
+            const group = new THREE.Group();
+            const color = structure.material?.color || '#ffff00';
+            const size = structure.scale || 1;
+
+            // Main star sphere
+            const geometry = this.getCachedGeometry(
+              `sphere_32`,
+              () => new THREE.SphereGeometry(10, 32, 32)
+            );
+
+            const material = this.getCachedMaterial(
+              `star_emissive_${color}`,
+              () =>
+                new THREE.MeshStandardMaterial({
+                  color: color,
+                  emissive: color,
+                  emissiveIntensity: 1.0,
+                  metalness: 0,
+                  roughness: 0.2,
+                })
+            );
+
+            const star = new THREE.Mesh(geometry, material);
+            star.castShadow = false;
+            group.add(star);
+
+            // Corona glow effect (larger transparent sphere)
+            const coronaGeometry = this.getCachedGeometry(
+              `sphere_16`,
+              () => new THREE.SphereGeometry(15, 16, 16)
+            );
+
+            const coronaMaterial = this.getCachedMaterial(
+              `corona_transparent_${color}`,
+              () =>
+                new THREE.MeshBasicMaterial({
+                  color: color,
+                  transparent: true,
+                  opacity: 0.3,
+                  side: THREE.BackSide,
+                })
+            );
+
+            const corona = new THREE.Mesh(coronaGeometry, coronaMaterial);
+            group.add(corona);
+
+            // Point light for illumination
+            const light = new THREE.PointLight(color, 2, 100);
+            group.add(light);
+
+            return group;
+          }
+
+          /**
+           * Create a planet with textured sphere and atmosphere
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Group} - Planet with atmosphere
+           */
+          createPlanet(structure) {
+            const group = new THREE.Group();
+            const color = structure.material?.color || '#4488ff';
+            const size = structure.scale || 1;
+
+            // Main planet sphere
+            const geometry = this.getCachedGeometry(
+              `sphere_32`,
+              () => new THREE.SphereGeometry(10, 32, 32)
+            );
+
+            const material = this.getCachedMaterial(
+              `planet_standard_${color}`,
+              () =>
+                new THREE.MeshStandardMaterial({
+                  color: color,
+                  metalness: 0.2,
+                  roughness: 0.8,
+                })
+            );
+
+            const planet = new THREE.Mesh(geometry, material);
+            planet.castShadow = true;
+            planet.receiveShadow = true;
+            group.add(planet);
+
+            // Atmospheric glow
+            const atmosphereGeometry = this.getCachedGeometry(
+              `sphere_16`,
+              () => new THREE.SphereGeometry(11, 16, 16)
+            );
+
+            const atmosphereMaterial = this.getCachedMaterial(
+              `atmosphere_transparent_${color}`,
+              () =>
+                new THREE.MeshBasicMaterial({
+                  color: color,
+                  transparent: true,
+                  opacity: 0.2,
+                  side: THREE.BackSide,
+                })
+            );
+
+            const atmosphere = new THREE.Mesh(
+              atmosphereGeometry,
+              atmosphereMaterial
+            );
+            group.add(atmosphere);
+
+            return group;
+          }
+
+          /**
+           * Create a galaxy with spiral particle system
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Points} - Galaxy particle system
+           */
+          createGalaxy(structure) {
+            const color = structure.material?.color || '#8844ff';
+            const maxParticles =
+              this._getQualitySetting('maxParticles') || 5000;
+            const particleCount = Math.min(
+              structure.params?.count || 5000,
+              maxParticles
+            );
+
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            const colors = new Float32Array(particleCount * 3);
+
+            const colorObj = new THREE.Color(color);
+
+            // Create spiral galaxy distribution
+            for (let i = 0; i < particleCount; i++) {
+              const angle = (i / particleCount) * Math.PI * 4; // 2 spiral arms
+              const radius = (i / particleCount) * 50 + Math.random() * 5;
+
+              const x = Math.cos(angle) * radius + (Math.random() - 0.5) * 10;
+              const z = Math.sin(angle) * radius + (Math.random() - 0.5) * 10;
+              const y = (Math.random() - 0.5) * 5; // Vertical spread
+
+              positions[i * 3] = x;
+              positions[i * 3 + 1] = y;
+              positions[i * 3 + 2] = z;
+
+              // Vary colors slightly
+              const colorVariation = 0.8 + Math.random() * 0.2;
+              colors[i * 3] = colorObj.r * colorVariation;
+              colors[i * 3 + 1] = colorObj.g * colorVariation;
+              colors[i * 3 + 2] = colorObj.b * colorVariation;
+            }
+
+            geometry.setAttribute(
+              'position',
+              new THREE.BufferAttribute(positions, 3)
+            );
+            geometry.setAttribute(
+              'color',
+              new THREE.BufferAttribute(colors, 3)
+            );
+
+            const material = new THREE.PointsMaterial({
+              size: 0.5,
+              vertexColors: true,
+              transparent: true,
+              opacity: 0.8,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+            });
+
+            const galaxy = new THREE.Points(geometry, material);
+            return galaxy;
+          }
+
+          /**
+           * Create a nebula with volumetric particle clouds
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Points} - Nebula particle system
+           */
+          createNebula(structure) {
+            const color = structure.material?.color || '#ff44ff';
+            const maxParticles =
+              this._getQualitySetting('maxParticles') || 5000;
+            const particleCount = Math.min(
+              structure.params?.count || 3000,
+              maxParticles
+            );
+
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            const colors = new Float32Array(particleCount * 3);
+
+            const colorObj = new THREE.Color(color);
+
+            // Create volumetric cloud distribution
+            for (let i = 0; i < particleCount; i++) {
+              // Use multiple overlapping spheres for cloud-like appearance
+              const theta = Math.random() * Math.PI * 2;
+              const phi = Math.random() * Math.PI;
+              const radius = 20 + Math.random() * 30;
+
+              const x = radius * Math.sin(phi) * Math.cos(theta);
+              const y = radius * Math.sin(phi) * Math.sin(theta);
+              const z = radius * Math.cos(phi);
+
+              positions[i * 3] = x;
+              positions[i * 3 + 1] = y;
+              positions[i * 3 + 2] = z;
+
+              // Vary colors for depth
+              const colorVariation = 0.5 + Math.random() * 0.5;
+              colors[i * 3] = colorObj.r * colorVariation;
+              colors[i * 3 + 1] = colorObj.g * colorVariation;
+              colors[i * 3 + 2] = colorObj.b * colorVariation;
+            }
+
+            geometry.setAttribute(
+              'position',
+              new THREE.BufferAttribute(positions, 3)
+            );
+            geometry.setAttribute(
+              'color',
+              new THREE.BufferAttribute(colors, 3)
+            );
+
+            const material = new THREE.PointsMaterial({
+              size: 2.0,
+              vertexColors: true,
+              transparent: true,
+              opacity: 0.6,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+            });
+
+            const nebula = new THREE.Points(geometry, material);
+            return nebula;
+          }
+
+          // ============================================================================
+          // NATURAL ELEMENTS
+          // ============================================================================
+
+          /**
+           * Create water surface with animated wave displacement
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Mesh} - Water surface mesh
+           */
+          createWater(structure) {
+            const color = structure.material?.color || '#0088ff';
+            const size = structure.scale || 1;
+
+            // Create plane geometry for water surface
+            const geometry = new THREE.PlaneGeometry(50, 50, 32, 32);
+
+            // Store original positions for wave animation
+            const positions = geometry.attributes.position;
+            const originalPositions = new Float32Array(positions.count * 3);
+            for (let i = 0; i < positions.count; i++) {
+              originalPositions[i * 3] = positions.getX(i);
+              originalPositions[i * 3 + 1] = positions.getY(i);
+              originalPositions[i * 3 + 2] = positions.getZ(i);
+            }
+            geometry.userData.originalPositions = originalPositions;
+
+            const material = this.getCachedMaterial(
+              `water_metallic_${color}`,
+              () =>
+                new THREE.MeshStandardMaterial({
+                  color: color,
+                  metalness: 0.9,
+                  roughness: 0.1,
+                  transparent: true,
+                  opacity: 0.8,
+                  side: THREE.DoubleSide,
+                })
+            );
+
+            const water = new THREE.Mesh(geometry, material);
+            water.rotation.x = -Math.PI / 2; // Horizontal
+            water.receiveShadow = true;
+            water.userData.isWater = true; // Flag for animation system
+
+            return water;
+          }
+
+          /**
+           * Create fire with particle-based flame effects
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Points} - Fire particle system
+           */
+          createFire(structure) {
+            const maxParticles =
+              this._getQualitySetting('maxParticles') || 2000;
+            const particleCount = Math.min(
+              structure.params?.count || 500,
+              maxParticles / 2
+            );
+
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            const colors = new Float32Array(particleCount * 3);
+            const velocities = new Float32Array(particleCount * 3);
+
+            // Create fire particles
+            for (let i = 0; i < particleCount; i++) {
+              // Start at base
+              const radius = Math.random() * 3;
+              const angle = Math.random() * Math.PI * 2;
+
+              positions[i * 3] = Math.cos(angle) * radius;
+              positions[i * 3 + 1] = Math.random() * 2; // Start low
+              positions[i * 3 + 2] = Math.sin(angle) * radius;
+
+              // Velocity upward with slight randomness
+              velocities[i * 3] = (Math.random() - 0.5) * 0.5;
+              velocities[i * 3 + 1] = 2 + Math.random() * 2; // Upward
+              velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.5;
+
+              // Color gradient from yellow to red
+              const t = Math.random();
+              colors[i * 3] = 1.0; // Red
+              colors[i * 3 + 1] = 0.5 + t * 0.5; // Yellow to orange
+              colors[i * 3 + 2] = 0.0; // No blue
+            }
+
+            geometry.setAttribute(
+              'position',
+              new THREE.BufferAttribute(positions, 3)
+            );
+            geometry.setAttribute(
+              'color',
+              new THREE.BufferAttribute(colors, 3)
+            );
+            geometry.userData.velocities = velocities;
+
+            const material = new THREE.PointsMaterial({
+              size: 1.5,
+              vertexColors: true,
+              transparent: true,
+              opacity: 0.8,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+            });
+
+            const fire = new THREE.Points(geometry, material);
+            fire.userData.isFire = true; // Flag for animation system
+
+            return fire;
+          }
+
+          /**
+           * Create clouds with volumetric particle formations
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Points} - Cloud particle system
+           */
+          createClouds(structure) {
+            const color = structure.material?.color || '#ffffff';
+            const maxParticles =
+              this._getQualitySetting('maxParticles') || 5000;
+            const particleCount = Math.min(
+              structure.params?.count || 1000,
+              maxParticles
+            );
+
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+
+            const colorObj = new THREE.Color(color);
+
+            // Create fluffy cloud distribution
+            for (let i = 0; i < particleCount; i++) {
+              // Multiple overlapping ellipsoids for cloud shape
+              const x = (Math.random() - 0.5) * 30;
+              const y = (Math.random() - 0.5) * 10;
+              const z = (Math.random() - 0.5) * 20;
+
+              positions[i * 3] = x;
+              positions[i * 3 + 1] = y;
+              positions[i * 3 + 2] = z;
+            }
+
+            geometry.setAttribute(
+              'position',
+              new THREE.BufferAttribute(positions, 3)
+            );
+
+            const material = new THREE.PointsMaterial({
+              size: 3.0,
+              color: color,
+              transparent: true,
+              opacity: 0.6,
+              depthWrite: false,
+            });
+
+            const clouds = new THREE.Points(geometry, material);
+            return clouds;
+          }
+
+          /**
+           * Create mountains with cone-based terrain
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Mesh} - Mountain mesh
+           */
+          createMountain(structure) {
+            const color = structure.material?.color || '#8b7355';
+            const size = structure.scale || 1;
+
+            // Create cone for mountain shape
+            const geometry = this.getCachedGeometry(
+              `cone_32`,
+              () => new THREE.ConeGeometry(15, 30, 32)
+            );
+
+            const material = this.getCachedMaterial(
+              `mountain_rough_${color}`,
+              () =>
+                new THREE.MeshStandardMaterial({
+                  color: color,
+                  metalness: 0.1,
+                  roughness: 0.9,
+                })
+            );
+
+            const mountain = new THREE.Mesh(geometry, material);
+            mountain.castShadow = true;
+            mountain.receiveShadow = true;
+
+            return mountain;
+          }
+
+          // ============================================================================
+          // LIVING BEINGS
+          // ============================================================================
+
+          /**
+           * Create a horse with simplified geometric model
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Group} - Horse model
+           */
+          createHorse(structure) {
+            const group = new THREE.Group();
+            const color = structure.material?.color || '#8b4513';
+
+            // Body (horizontal cylinder)
+            const bodyGeometry = this.getCachedGeometry(
+              `cylinder_8`,
+              () => new THREE.CylinderGeometry(4, 5, 12, 8)
+            );
+            const material = new THREE.MeshStandardMaterial({
+              color: color,
+              metalness: 0.1,
+              roughness: 0.8,
+            });
+
+            const body = new THREE.Mesh(bodyGeometry, material);
+            body.rotation.z = Math.PI / 2;
+            body.castShadow = true;
+            body.receiveShadow = true;
+            group.add(body);
+
+            // Head (cone)
+            const headGeometry = this.getCachedGeometry(
+              `cone_8`,
+              () => new THREE.ConeGeometry(3, 6, 8)
+            );
+            const head = new THREE.Mesh(headGeometry, material);
+            head.position.set(7, 2, 0);
+            head.rotation.z = Math.PI / 2;
+            head.castShadow = true;
+            group.add(head);
+
+            // Neck
+            const neckGeometry = this.getCachedGeometry(
+              `cylinder_6`,
+              () => new THREE.CylinderGeometry(2, 2, 4, 6)
+            );
+            const neck = new THREE.Mesh(neckGeometry, material);
+            neck.position.set(5, 1, 0);
+            neck.rotation.z = Math.PI / 4;
+            neck.castShadow = true;
+            group.add(neck);
+
+            // Legs (4 cylinders)
+            const legGeometry = this.getCachedGeometry(
+              `cylinder_leg`,
+              () => new THREE.CylinderGeometry(1, 1, 8, 6)
+            );
+
+            const legPositions = [
+              [3, -6, 2],
+              [3, -6, -2],
+              [-3, -6, 2],
+              [-3, -6, -2],
+            ];
+
+            legPositions.forEach((pos) => {
+              const leg = new THREE.Mesh(legGeometry, material);
+              leg.position.set(pos[0], pos[1], pos[2]);
+              leg.castShadow = true;
+              group.add(leg);
+            });
+
+            // Tail
+            const tailGeometry = this.getCachedGeometry(
+              `cone_tail`,
+              () => new THREE.ConeGeometry(0.5, 6, 6)
+            );
+            const tail = new THREE.Mesh(tailGeometry, material);
+            tail.position.set(-7, 0, 0);
+            tail.rotation.z = -Math.PI / 4;
+            tail.castShadow = true;
+            group.add(tail);
+
+            return group;
+          }
+
+          /**
+           * Create a bird with basic body and wing geometry
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Group} - Bird model
+           */
+          createBird(structure) {
+            const group = new THREE.Group();
+            const color = structure.material?.color || '#4488ff';
+
+            const material = new THREE.MeshStandardMaterial({
+              color: color,
+              metalness: 0.2,
+              roughness: 0.7,
+            });
+
+            // Body (ellipsoid)
+            const bodyGeometry = this.getCachedGeometry(
+              `sphere_16`,
+              () => new THREE.SphereGeometry(3, 16, 16)
+            );
+            const body = new THREE.Mesh(bodyGeometry, material);
+            body.scale.set(1, 0.8, 1.5);
+            body.castShadow = true;
+            body.receiveShadow = true;
+            group.add(body);
+
+            // Head (smaller sphere)
+            const headGeometry = this.getCachedGeometry(
+              `sphere_12`,
+              () => new THREE.SphereGeometry(1.5, 12, 12)
+            );
+            const head = new THREE.Mesh(headGeometry, material);
+            head.position.set(0, 1, 3);
+            head.castShadow = true;
+            group.add(head);
+
+            // Beak (cone)
+            const beakGeometry = this.getCachedGeometry(
+              `cone_beak`,
+              () => new THREE.ConeGeometry(0.3, 1, 6)
+            );
+            const beakMaterial = new THREE.MeshStandardMaterial({
+              color: '#ff8800',
+              metalness: 0.3,
+              roughness: 0.6,
+            });
+            const beak = new THREE.Mesh(beakGeometry, beakMaterial);
+            beak.position.set(0, 1, 4.5);
+            beak.rotation.x = Math.PI / 2;
+            group.add(beak);
+
+            // Wings (flat boxes)
+            const wingGeometry = this.getCachedGeometry(
+              `wing_box`,
+              () => new THREE.BoxGeometry(8, 0.5, 4)
+            );
+
+            const leftWing = new THREE.Mesh(wingGeometry, material);
+            leftWing.position.set(-5, 0, 0);
+            leftWing.rotation.z = -Math.PI / 6;
+            leftWing.castShadow = true;
+            group.add(leftWing);
+
+            const rightWing = new THREE.Mesh(wingGeometry, material);
+            rightWing.position.set(5, 0, 0);
+            rightWing.rotation.z = Math.PI / 6;
+            rightWing.castShadow = true;
+            group.add(rightWing);
+
+            return group;
+          }
+
+          /**
+           * Create a fish with streamlined body shape
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Group} - Fish model
+           */
+          createFish(structure) {
+            const group = new THREE.Group();
+            const color = structure.material?.color || '#ff8844';
+
+            const material = new THREE.MeshStandardMaterial({
+              color: color,
+              metalness: 0.6,
+              roughness: 0.3,
+            });
+
+            // Body (stretched sphere)
+            const bodyGeometry = this.getCachedGeometry(
+              `sphere_16`,
+              () => new THREE.SphereGeometry(3, 16, 16)
+            );
+            const body = new THREE.Mesh(bodyGeometry, material);
+            body.scale.set(1, 0.8, 2);
+            body.castShadow = true;
+            body.receiveShadow = true;
+            group.add(body);
+
+            // Tail fin (triangle)
+            const tailGeometry = this.getCachedGeometry(
+              `cone_tail_fish`,
+              () => new THREE.ConeGeometry(3, 4, 3)
+            );
+            const tail = new THREE.Mesh(tailGeometry, material);
+            tail.position.set(0, 0, -6);
+            tail.rotation.x = Math.PI / 2;
+            tail.castShadow = true;
+            group.add(tail);
+
+            // Side fins
+            const finGeometry = this.getCachedGeometry(
+              `fin_box`,
+              () => new THREE.BoxGeometry(4, 0.2, 2)
+            );
+
+            const leftFin = new THREE.Mesh(finGeometry, material);
+            leftFin.position.set(-3, 0, 1);
+            leftFin.rotation.z = -Math.PI / 4;
+            group.add(leftFin);
+
+            const rightFin = new THREE.Mesh(finGeometry, material);
+            rightFin.position.set(3, 0, 1);
+            rightFin.rotation.z = Math.PI / 4;
+            group.add(rightFin);
+
+            // Top fin
+            const topFin = new THREE.Mesh(finGeometry, material);
+            topFin.position.set(0, 3, 0);
+            topFin.rotation.x = Math.PI / 2;
+            group.add(topFin);
+
+            return group;
+          }
+
+          /**
+           * Create a human with simplified humanoid figure
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Group} - Human model
+           */
+          createHuman(structure) {
+            const group = new THREE.Group();
+            const color = structure.material?.color || '#ffdbac';
+
+            const material = new THREE.MeshStandardMaterial({
+              color: color,
+              metalness: 0.1,
+              roughness: 0.8,
+            });
+
+            // Head (sphere)
+            const headGeometry = this.getCachedGeometry(
+              `sphere_16`,
+              () => new THREE.SphereGeometry(2, 16, 16)
+            );
+            const head = new THREE.Mesh(headGeometry, material);
+            head.position.set(0, 8, 0);
+            head.castShadow = true;
+            group.add(head);
+
+            // Body (box)
+            const bodyGeometry = this.getCachedGeometry(
+              `body_box`,
+              () => new THREE.BoxGeometry(4, 6, 2)
+            );
+            const body = new THREE.Mesh(bodyGeometry, material);
+            body.position.set(0, 3, 0);
+            body.castShadow = true;
+            body.receiveShadow = true;
+            group.add(body);
+
+            // Arms (cylinders)
+            const armGeometry = this.getCachedGeometry(
+              `arm_cylinder`,
+              () => new THREE.CylinderGeometry(0.6, 0.6, 5, 8)
+            );
+
+            const leftArm = new THREE.Mesh(armGeometry, material);
+            leftArm.position.set(-3, 3, 0);
+            leftArm.castShadow = true;
+            group.add(leftArm);
+
+            const rightArm = new THREE.Mesh(armGeometry, material);
+            rightArm.position.set(3, 3, 0);
+            rightArm.castShadow = true;
+            group.add(rightArm);
+
+            // Legs (cylinders)
+            const legGeometry = this.getCachedGeometry(
+              `leg_cylinder`,
+              () => new THREE.CylinderGeometry(0.8, 0.8, 6, 8)
+            );
+
+            const leftLeg = new THREE.Mesh(legGeometry, material);
+            leftLeg.position.set(-1, -3, 0);
+            leftLeg.castShadow = true;
+            group.add(leftLeg);
+
+            const rightLeg = new THREE.Mesh(legGeometry, material);
+            rightLeg.position.set(1, -3, 0);
+            rightLeg.castShadow = true;
+            group.add(rightLeg);
+
+            return group;
+          }
+
+          // ============================================================================
+          // ARCHITECTURAL STRUCTURES
+          // ============================================================================
+
+          /**
+           * Create a tower with cylindrical base and spire
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Group} - Tower model
+           */
+          createTower(structure) {
+            const group = new THREE.Group();
+            const color = structure.material?.color || '#cccccc';
+
+            const material = new THREE.MeshStandardMaterial({
+              color: color,
+              metalness: 0.2,
+              roughness: 0.8,
+            });
+
+            // Base (cylinder)
+            const baseGeometry = this.getCachedGeometry(
+              `tower_base`,
+              () => new THREE.CylinderGeometry(8, 10, 20, 16)
+            );
+            const base = new THREE.Mesh(baseGeometry, material);
+            base.position.set(0, 10, 0);
+            base.castShadow = true;
+            base.receiveShadow = true;
+            group.add(base);
+
+            // Middle section (narrower cylinder)
+            const middleGeometry = this.getCachedGeometry(
+              `tower_middle`,
+              () => new THREE.CylinderGeometry(6, 8, 15, 16)
+            );
+            const middle = new THREE.Mesh(middleGeometry, material);
+            middle.position.set(0, 27.5, 0);
+            middle.castShadow = true;
+            group.add(middle);
+
+            // Spire (cone)
+            const spireGeometry = this.getCachedGeometry(
+              `tower_spire`,
+              () => new THREE.ConeGeometry(6, 12, 16)
+            );
+            const spire = new THREE.Mesh(spireGeometry, material);
+            spire.position.set(0, 41, 0);
+            spire.castShadow = true;
+            group.add(spire);
+
+            return group;
+          }
+
+          /**
+           * Create a bridge with spanning structure
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Group} - Bridge model
+           */
+          createBridge(structure) {
+            const group = new THREE.Group();
+            const color = structure.material?.color || '#8b7355';
+
+            const material = new THREE.MeshStandardMaterial({
+              color: color,
+              metalness: 0.3,
+              roughness: 0.7,
+            });
+
+            // Main deck (long box)
+            const deckGeometry = this.getCachedGeometry(
+              `bridge_deck`,
+              () => new THREE.BoxGeometry(40, 2, 8)
+            );
+            const deck = new THREE.Mesh(deckGeometry, material);
+            deck.position.set(0, 0, 0);
+            deck.castShadow = true;
+            deck.receiveShadow = true;
+            group.add(deck);
+
+            // Support pillars
+            const pillarGeometry = this.getCachedGeometry(
+              `bridge_pillar`,
+              () => new THREE.CylinderGeometry(2, 2, 15, 8)
+            );
+
+            const pillarPositions = [
+              [-15, -8.5, 0],
+              [0, -8.5, 0],
+              [15, -8.5, 0],
+            ];
+
+            pillarPositions.forEach((pos) => {
+              const pillar = new THREE.Mesh(pillarGeometry, material);
+              pillar.position.set(pos[0], pos[1], pos[2]);
+              pillar.castShadow = true;
+              group.add(pillar);
+            });
+
+            // Railings (thin boxes)
+            const railingGeometry = this.getCachedGeometry(
+              `bridge_railing`,
+              () => new THREE.BoxGeometry(40, 2, 0.5)
+            );
+
+            const leftRailing = new THREE.Mesh(railingGeometry, material);
+            leftRailing.position.set(0, 2, 4);
+            group.add(leftRailing);
+
+            const rightRailing = new THREE.Mesh(railingGeometry, material);
+            rightRailing.position.set(0, 2, -4);
+            group.add(rightRailing);
+
+            return group;
+          }
+
+          /**
+           * Create a crystal with transparent geometric form
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Mesh} - Crystal mesh
+           */
+          createCrystal(structure) {
+            const color = structure.material?.color || '#88ffff';
+
+            // Create octahedron for crystal shape
+            const geometry = this.getCachedGeometry(
+              `crystal_octahedron`,
+              () => new THREE.OctahedronGeometry(8, 0)
+            );
+
+            const material = new THREE.MeshPhysicalMaterial({
+              color: color,
+              metalness: 0.1,
+              roughness: 0.1,
+              transparent: true,
+              opacity: 0.7,
+              transmission: 0.9,
+              thickness: 0.5,
+            });
+
+            const crystal = new THREE.Mesh(geometry, material);
+            crystal.castShadow = true;
+            crystal.receiveShadow = true;
+
+            return crystal;
+          }
+
+          /**
+           * Create a ship/boat with hull and sails
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Group} - Ship model
+           */
+          createShip(structure) {
+            const group = new THREE.Group();
+            const color = structure.material?.color || '#8b4513';
+
+            const hullMaterial = new THREE.MeshStandardMaterial({
+              color: color,
+              metalness: 0.2,
+              roughness: 0.8,
+            });
+
+            // Hull (elongated box with tapered front)
+            const hullGeometry = this.getCachedGeometry(
+              `ship_hull`,
+              () => new THREE.BoxGeometry(20, 6, 8)
+            );
+            const hull = new THREE.Mesh(hullGeometry, hullMaterial);
+            hull.position.set(0, 0, 0);
+            hull.castShadow = true;
+            hull.receiveShadow = true;
+            group.add(hull);
+
+            // Bow (front pointed section)
+            const bowGeometry = this.getCachedGeometry(
+              `ship_bow`,
+              () => new THREE.ConeGeometry(4, 8, 4)
+            );
+            const bow = new THREE.Mesh(bowGeometry, hullMaterial);
+            bow.rotation.z = Math.PI / 2;
+            bow.position.set(14, 0, 0);
+            bow.castShadow = true;
+            group.add(bow);
+
+            // Deck (flat top)
+            const deckGeometry = this.getCachedGeometry(
+              `ship_deck`,
+              () => new THREE.BoxGeometry(18, 0.5, 7)
+            );
+            const deck = new THREE.Mesh(deckGeometry, hullMaterial);
+            deck.position.set(0, 3.5, 0);
+            deck.castShadow = true;
+            deck.receiveShadow = true;
+            group.add(deck);
+
+            // Mast (vertical pole)
+            const mastMaterial = new THREE.MeshStandardMaterial({
+              color: '#654321',
+              metalness: 0.1,
+              roughness: 0.9,
+            });
+            const mastGeometry = this.getCachedGeometry(
+              `ship_mast`,
+              () => new THREE.CylinderGeometry(0.5, 0.5, 20, 8)
+            );
+            const mast = new THREE.Mesh(mastGeometry, mastMaterial);
+            mast.position.set(0, 14, 0);
+            mast.castShadow = true;
+            group.add(mast);
+
+            // Sail (white cloth)
+            const sailMaterial = new THREE.MeshStandardMaterial({
+              color: '#f0f0f0',
+              metalness: 0.0,
+              roughness: 0.9,
+              side: THREE.DoubleSide,
+            });
+            const sailGeometry = this.getCachedGeometry(
+              `ship_sail`,
+              () => new THREE.PlaneGeometry(12, 15)
+            );
+            const sail = new THREE.Mesh(sailGeometry, sailMaterial);
+            sail.position.set(0, 14, 0);
+            sail.castShadow = true;
+            sail.receiveShadow = true;
+            group.add(sail);
+
+            // Add slight curve to sail for realism
+            sail.rotation.y = 0.1;
+
+            return group;
+          }
+
+          /**
+           * Create a generic fallback structure for unknown types
+           * @param {Object} structure - Structure specification
+           * @returns {THREE.Mesh} - Generic box mesh
+           */
+          createGenericStructure(structure) {
+            const geometry = this.getCachedGeometry(
+              'generic_box',
+              () => new THREE.BoxGeometry(10, 10, 10)
+            );
+
+            const color = structure.material?.color || '#888888';
+            const material = this.getCachedMaterial(
+              `generic_standard_${color}`,
+              () =>
+                new THREE.MeshStandardMaterial({
+                  color: color,
+                  metalness: 0.3,
+                  roughness: 0.7,
+                })
+            );
+
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+
+            return mesh;
+          }
+
+          // ============================================================================
+          // PARTICLE ENTITY SYSTEMS
+          // ============================================================================
+
+          /**
+           * Create a particle stream with velocity-based movement
+           * @param {Object} entity - Entity specification
+           * @returns {THREE.Points} - Particle stream
+           */
+          createParticleStream(entity) {
+            // TASK 10.2: Use parameter validation for particle parameters
+            const maxParticles =
+              this._getQualitySetting('maxParticles') || 5000;
+            const count = ParameterValidator.validateParticleCount(
+              entity.count,
+              maxParticles,
+              1000
+            );
+            const params = entity.params || {};
+            const color = ParameterValidator.validateColor(
+              params.color,
+              '#00ffff'
+            );
+            const speed = ParameterValidator.validateNumber(
+              params.speed,
+              0.1,
+              10,
+              1.0
+            );
+            const size = ParameterValidator.validateNumber(
+              params.size,
+              0.1,
+              10,
+              1.0
+            );
+
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+            const velocities = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+
+            const colorObj = new THREE.Color(color);
+
+            for (let i = 0; i < count; i++) {
+              // Random starting positions in a volume
+              positions[i * 3] = (Math.random() - 0.5) * 20;
+              positions[i * 3 + 1] = (Math.random() - 0.5) * 20;
+              positions[i * 3 + 2] = (Math.random() - 0.5) * 20;
+
+              // Random velocities
+              velocities[i * 3] = (Math.random() - 0.5) * speed;
+              velocities[i * 3 + 1] = (Math.random() - 0.5) * speed;
+              velocities[i * 3 + 2] = (Math.random() - 0.5) * speed;
+
+              // Colors with slight variation
+              const variation = 0.8 + Math.random() * 0.2;
+              colors[i * 3] = colorObj.r * variation;
+              colors[i * 3 + 1] = colorObj.g * variation;
+              colors[i * 3 + 2] = colorObj.b * variation;
+            }
+
+            geometry.setAttribute(
+              'position',
+              new THREE.BufferAttribute(positions, 3)
+            );
+            geometry.setAttribute(
+              'color',
+              new THREE.BufferAttribute(colors, 3)
+            );
+            geometry.userData.velocities = velocities;
+            geometry.userData.maxDistance = 50;
+
+            const material = new THREE.PointsMaterial({
+              size: size,
+              vertexColors: true,
+              transparent: true,
+              opacity: params.glow ? 0.9 : 0.7,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+            });
+
+            const particles = new THREE.Points(geometry, material);
+            particles.userData.isParticleStream = true;
+            particles.userData.params = params;
+
+            return particles;
+          }
+
+          /**
+           * Create floating orbs with glowing spheres
+           * @param {Object} entity - Entity specification
+           * @returns {THREE.Group} - Group of floating orbs
+           */
+          createFloatingOrbs(entity) {
+            // TASK 10.2: Use parameter validation for orb parameters
+            const group = new THREE.Group();
+            const maxOrbs = Math.floor(
+              (this._getQualitySetting('maxParticles') || 5000) / 100
+            );
+            const count = ParameterValidator.validateParticleCount(
+              entity.count,
+              maxOrbs,
+              10
+            );
+            const params = entity.params || {};
+            const color = ParameterValidator.validateColor(
+              params.color,
+              '#ffff00'
+            );
+            const size = ParameterValidator.validateNumber(
+              params.size,
+              0.1,
+              10,
+              1.0
+            );
+            const glow = ParameterValidator.validateNumber(
+              params.glow,
+              0,
+              2,
+              0.5
+            );
+
+            for (let i = 0; i < count; i++) {
+              // Create orb geometry
+              const geometry = this.getCachedGeometry(
+                `orb_sphere`,
+                () => new THREE.SphereGeometry(1, 16, 16)
+              );
+
+              const material = new THREE.MeshStandardMaterial({
+                color: color,
+                emissive: color,
+                emissiveIntensity: glow,
+                metalness: 0,
+                roughness: 0.2,
+              });
+
+              const orb = new THREE.Mesh(geometry, material);
+
+              // Random position
+              orb.position.set(
+                (Math.random() - 0.5) * 30,
+                (Math.random() - 0.5) * 30,
+                (Math.random() - 0.5) * 30
+              );
+
+              // Scale based on size parameter
+              orb.scale.setScalar(size);
+
+              // Store animation data
+              orb.userData.floatOffset = Math.random() * Math.PI * 2;
+              orb.userData.floatSpeed = 0.5 + Math.random() * 0.5;
+              orb.userData.floatAmplitude = 2 + Math.random() * 2;
+
+              group.add(orb);
+            }
+
+            group.userData.isFloatingOrbs = true;
+            return group;
+          }
+
+          /**
+           * Create light butterflies with animated particles
+           * @param {Object} entity - Entity specification
+           * @returns {THREE.Points} - Butterfly particle system
+           */
+          createLightButterflies(entity) {
+            // TASK 10.2: Use parameter validation for butterfly parameters
+            const maxParticles =
+              this._getQualitySetting('maxParticles') || 5000;
+            const count = ParameterValidator.validateParticleCount(
+              entity.count,
+              Math.floor(maxParticles / 25),
+              50
+            );
+            const params = entity.params || {};
+            const color = ParameterValidator.validateColor(
+              params.color,
+              '#ffaaff'
+            );
+            const speed = ParameterValidator.validateNumber(
+              params.speed,
+              0.1,
+              10,
+              1.0
+            );
+            const size = ParameterValidator.validateNumber(
+              params.size,
+              0.1,
+              10,
+              1.5
+            );
+
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+            const velocities = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+
+            const colorObj = new THREE.Color(color);
+
+            for (let i = 0; i < count; i++) {
+              // Random starting positions
+              positions[i * 3] = (Math.random() - 0.5) * 40;
+              positions[i * 3 + 1] = (Math.random() - 0.5) * 40;
+              positions[i * 3 + 2] = (Math.random() - 0.5) * 40;
+
+              // Fluttering velocities (more erratic)
+              velocities[i * 3] = (Math.random() - 0.5) * speed * 2;
+              velocities[i * 3 + 1] = (Math.random() - 0.5) * speed * 2;
+              velocities[i * 3 + 2] = (Math.random() - 0.5) * speed * 2;
+
+              // Bright colors
+              colors[i * 3] = colorObj.r;
+              colors[i * 3 + 1] = colorObj.g;
+              colors[i * 3 + 2] = colorObj.b;
+            }
+
+            geometry.setAttribute(
+              'position',
+              new THREE.BufferAttribute(positions, 3)
+            );
+            geometry.setAttribute(
+              'color',
+              new THREE.BufferAttribute(colors, 3)
+            );
+            geometry.userData.velocities = velocities;
+            geometry.userData.maxDistance = 60;
+            geometry.userData.flutterSpeed = speed;
+
+            const material = new THREE.PointsMaterial({
+              size: size,
+              vertexColors: true,
+              transparent: true,
+              opacity: 0.8,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+            });
+
+            const butterflies = new THREE.Points(geometry, material);
+            butterflies.userData.isLightButterflies = true;
+            butterflies.userData.params = params;
+
+            return butterflies;
+          }
+
+          /**
+           * Create ship entity (multiple ship instances)
+           * @param {Object} entity - Entity specification
+           * @returns {THREE.Group} - Group of ships
+           */
+          createShipEntity(entity) {
+            const group = new THREE.Group();
+            const count = Math.min(entity.count || 5, 50); // Limit to 50 ships max
+            const params = entity.params || {};
+            const color = ParameterValidator.validateColor(
+              params.color,
+              '#8b4513'
+            );
+            const size = ParameterValidator.validateNumber(
+              params.size,
+              0.1,
+              5,
+              1.0
+            );
+            const speed = ParameterValidator.validateNumber(
+              params.speed,
+              0.1,
+              5,
+              1.0
+            );
+
+            // Create multiple ships in a formation
+            for (let i = 0; i < count; i++) {
+              // Create a ship structure
+              const shipStructure = {
+                type: 'ship',
+                material: { color: color },
+                scale: size * (0.5 + Math.random() * 0.5), // Vary sizes
+              };
+
+              const ship = this.createShip(shipStructure);
+
+              // Position ships in a scattered formation
+              const angle = (i / count) * Math.PI * 2;
+              const radius = 20 + Math.random() * 30;
+              ship.position.x = Math.cos(angle) * radius;
+              ship.position.z = Math.sin(angle) * radius;
+              ship.position.y = -2 + Math.random() * 2; // Slightly varied height
+
+              // Random rotation for variety
+              ship.rotation.y = angle + (Math.random() - 0.5) * 0.5;
+
+              // Store velocity for animation
+              ship.userData.velocity = {
+                x: Math.cos(angle) * speed * 0.5,
+                z: Math.sin(angle) * speed * 0.5,
+              };
+              ship.userData.isShipEntity = true;
+
+              group.add(ship);
+            }
+
+            group.userData.isShipEntity = true;
+            group.userData.params = params;
+
+            return group;
+          }
+
+          /**
+           * Update particle system (called by AnimationController)
+           * @param {THREE.Points} particles - Particle system to update
+           * @param {number} deltaTime - Time since last update
+           */
+          updateParticleSystem(particles, deltaTime) {
+            if (!particles.geometry.attributes.position) return;
+
+            const positions = particles.geometry.attributes.position.array;
+            const velocities = particles.geometry.userData.velocities;
+            const maxDistance = particles.geometry.userData.maxDistance || 50;
+
+            if (!velocities) return;
+
+            for (let i = 0; i < positions.length; i += 3) {
+              // Update position based on velocity
+              positions[i] += velocities[i] * deltaTime;
+              positions[i + 1] += velocities[i + 1] * deltaTime;
+              positions[i + 2] += velocities[i + 2] * deltaTime;
+
+              // Reset particles that go too far
+              const distance = Math.sqrt(
+                positions[i] ** 2 +
+                  positions[i + 1] ** 2 +
+                  positions[i + 2] ** 2
+              );
+
+              if (distance > maxDistance) {
+                positions[i] = (Math.random() - 0.5) * 10;
+                positions[i + 1] = (Math.random() - 0.5) * 10;
+                positions[i + 2] = (Math.random() - 0.5) * 10;
+              }
+            }
+
+            particles.geometry.attributes.position.needsUpdate = true;
+          }
+
+          // ============================================================================
+          // VISUAL FEATURES
+          // ============================================================================
+
+          /**
+           * Apply visual features to a mesh
+           * @param {THREE.Object3D} mesh - The mesh to apply features to
+           * @param {Array<string>} features - Array of feature names
+           * @param {Object} structure - Original structure specification
+           */
+          applyFeatures(mesh, features, structure) {
+            if (!features || features.length === 0) return;
+
+            features.forEach((feature) => {
+              const featureName = feature.toLowerCase();
+
+              switch (featureName) {
+                case 'glowing_edges':
+                  this.applyGlowingEdges(mesh, structure);
+                  break;
+                case 'emissive':
+                  this.applyEmissive(mesh, structure);
+                  break;
+                case 'particle_trail':
+                  this.applyParticleTrail(mesh, structure);
+                  break;
+                case 'particle_effects':
+                  // Apply both particle trail and emissive for particle effects
+                  this.applyParticleTrail(mesh, structure);
+                  this.applyEmissive(mesh, structure);
+                  break;
+                case 'rotating':
+                case 'animated':
+                  this.applyAutoRotation(mesh, structure);
+                  break;
+                case 'pulsating':
+                  this.applyPulsating(mesh, structure);
+                  break;
+                default:
+                  console.warn(`Unknown feature: ${feature}`);
+              }
+            });
+          }
+
+          /**
+           * Apply glowing edges effect with rim lighting
+           * @param {THREE.Object3D} mesh - The mesh to modify
+           * @param {Object} structure - Structure specification
+           */
+          applyGlowingEdges(mesh, structure) {
+            const color = structure.material?.color || '#ffffff';
+
+            // Traverse all meshes in the object
+            mesh.traverse((child) => {
+              if (child.isMesh && child.material) {
+                // Add emissive properties for glow effect
+                if (child.material.emissive) {
+                  child.material.emissive = new THREE.Color(color);
+                  child.material.emissiveIntensity = 0.3;
+                }
+              }
+            });
+
+            // Store feature flag for potential shader effects
+            mesh.userData.hasGlowingEdges = true;
+          }
+
+          /**
+           * Apply emissive effect with material properties
+           * @param {THREE.Object3D} mesh - The mesh to modify
+           * @param {Object} structure - Structure specification
+           */
+          applyEmissive(mesh, structure) {
+            const color = structure.material?.color || '#ffffff';
+            const intensity = structure.material?.emissiveIntensity || 0.8;
+
+            mesh.traverse((child) => {
+              if (child.isMesh && child.material) {
+                if (child.material.emissive) {
+                  child.material.emissive = new THREE.Color(color);
+                  child.material.emissiveIntensity = intensity;
+                }
+              }
+            });
+
+            mesh.userData.isEmissive = true;
+          }
+
+          /**
+           * Apply particle trail generation
+           * @param {THREE.Object3D} mesh - The mesh to add trail to
+           * @param {Object} structure - Structure specification
+           */
+          applyParticleTrail(mesh, structure) {
+            const color = structure.material?.color || '#ffffff';
+            const trailLength = 50;
+
+            // Create trail particle system
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(trailLength * 3);
+            const colors = new Float32Array(trailLength * 3);
+
+            const colorObj = new THREE.Color(color);
+
+            // Initialize trail positions at mesh position
+            for (let i = 0; i < trailLength; i++) {
+              positions[i * 3] = mesh.position.x;
+              positions[i * 3 + 1] = mesh.position.y;
+              positions[i * 3 + 2] = mesh.position.z;
+
+              // Fade out along trail
+              const alpha = 1 - i / trailLength;
+              colors[i * 3] = colorObj.r * alpha;
+              colors[i * 3 + 1] = colorObj.g * alpha;
+              colors[i * 3 + 2] = colorObj.b * alpha;
+            }
+
+            geometry.setAttribute(
+              'position',
+              new THREE.BufferAttribute(positions, 3)
+            );
+            geometry.setAttribute(
+              'color',
+              new THREE.BufferAttribute(colors, 3)
+            );
+
+            const material = new THREE.PointsMaterial({
+              size: 1.0,
+              vertexColors: true,
+              transparent: true,
+              opacity: 0.6,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+            });
+
+            const trail = new THREE.Points(geometry, material);
+            trail.userData.isTrail = true;
+            trail.userData.trailIndex = 0;
+            trail.userData.parentMesh = mesh;
+
+            // Add trail as child
+            mesh.add(trail);
+            mesh.userData.hasParticleTrail = true;
+          }
+
+          /**
+           * Apply automatic rotation animation
+           * @param {THREE.Object3D} mesh - The mesh to rotate
+           * @param {Object} structure - Structure specification
+           */
+          applyAutoRotation(mesh, structure) {
+            // Store rotation parameters for AnimationController
+            mesh.userData.autoRotate = true;
+            mesh.userData.rotationSpeed = structure.animation?.speed || 1.0;
+            mesh.userData.rotationAxis = structure.animation?.axis || 'y';
+          }
+
+          /**
+           * Apply pulsating animation
+           * @param {THREE.Object3D} mesh - The mesh to pulsate
+           * @param {Object} structure - Structure specification
+           */
+          applyPulsating(mesh, structure) {
+            // Store pulsating parameters for AnimationController
+            mesh.userData.pulsating = true;
+            mesh.userData.pulseSpeed = structure.animation?.speed || 1.0;
+            mesh.userData.pulseAmplitude =
+              structure.animation?.amplitude || 0.2;
+          }
+
+          /**
+           * Dispose all cached geometries and materials
+           */
+          dispose() {
+            this.geometryCache.forEach((geometry) => geometry.dispose());
+            this.geometryCache.clear();
+
+            this.materialCache.forEach((material) => material.dispose());
+            this.materialCache.clear();
+          }
+        }
+
+        // ========================================================================
+        // SceneRenderer
+        // ========================================================================
+        /**
+         * SceneRenderer - Main 3D rendering engine
+         * Manages Three.js scene, camera, renderer, and coordinates all subsystems
+         */
+
+        class SceneRenderer {
+          constructor(canvas, options = {}) {
+            this.canvas = canvas;
+            this.options = {
+              quality: options.quality || 'medium',
+              enableShadows: options.enableShadows !== false,
+              enablePostProcessing: options.enablePostProcessing !== false,
+              ...options,
+            };
+
+            // Three.js core objects (will be initialized)
+            this.scene = null;
+            this.camera = null;
+            this.renderer = null;
+
+            // Subsystems (will be initialized)
+            this.assetLibrary = null;
+            this.materialSystem = null;
+            this.animationController = null;
+            this.cameraController = null;
+
+            // State
+            this.renderObjects = new Map();
+            this.isAnimating = false;
+            this.currentTime = 0;
+            this.dreamData = null;
+            this.animationFrameId = null;
+            this.lastFrameTime = 0;
+            this.frameCount = 0;
+            this.fpsWarningThreshold = 20;
+
+            // Performance monitoring
+            this.performanceStats = {
+              fps: 60,
+              frameTime: 0,
+              memoryUsage: 0,
+              lowFpsCount: 0,
+              lastMemoryCheck: 0,
+            };
+            this.performanceCheckInterval = 60; // Check every 60 frames
+            this.autoQualityAdjustment =
+              options.autoQualityAdjustment !== false;
+
+            // Initialize Three.js
+            this._initThreeJS();
+
+            // Set up resize handler
+            this._setupResizeHandler();
+          }
+
+          /**
+           * Initialize Three.js scene, camera, and renderer
+           * @private
+           */
+          _initThreeJS() {
+            // TASK 10.3: Check for WebGL availability
+            try {
+              // Test WebGL support
+              const testCanvas = document.createElement('canvas');
+              const gl =
+                testCanvas.getContext('webgl') ||
+                testCanvas.getContext('experimental-webgl');
+
+              if (!gl) {
+                throw new Error('WebGL not supported');
+              }
+
+              console.log('WebGL is available');
+            } catch (webglError) {
+              console.error('WebGL Error:', webglError);
+              this._showWebGLError();
+              throw new Error(
+                'WebGL is not available. Please use a browser that supports WebGL.'
+              );
+            }
+
+            try {
+              // Create scene
+              this.scene = new THREE.Scene();
+              this.scene.background = new THREE.Color(0x000011);
+
+              // Create camera
+              const aspect = this.canvas.width / this.canvas.height;
+              this.camera = new THREE.PerspectiveCamera(
+                75, // FOV
+                aspect, // Aspect ratio
+                0.1, // Near plane
+                10000 // Far plane
+              );
+              this.camera.position.set(0, 50, 100);
+              this.camera.lookAt(0, 0, 0);
+
+              // Create renderer with error handling
+              try {
+                this.renderer = new THREE.WebGLRenderer({
+                  canvas: this.canvas,
+                  antialias: this._getQualitySetting('antialias'),
+                  alpha: true,
+                  powerPreference: 'high-performance',
+                });
+              } catch (rendererError) {
+                console.error(
+                  'Failed to create WebGL renderer:',
+                  rendererError
+                );
+                // Try again with minimal settings
+                console.warn('Retrying with minimal renderer settings...');
+                this.renderer = new THREE.WebGLRenderer({
+                  canvas: this.canvas,
+                  antialias: false,
+                  alpha: false,
+                });
+              }
+
+              // Set up WebGL context lost/restored handlers
+              this.canvas.addEventListener(
+                'webglcontextlost',
+                (event) => {
+                  event.preventDefault();
+                  console.error('WebGL context lost!');
+                  this.pause();
+                  this._showContextLostError();
+                },
+                false
+              );
+
+              this.canvas.addEventListener(
+                'webglcontextrestored',
+                () => {
+                  console.log('WebGL context restored, reinitializing...');
+                  this._initThreeJS();
+                  this.resume();
+                },
+                false
+              );
+
+              // Configure renderer based on quality level
+              this._configureRenderer();
+
+              // Set initial size
+              this.renderer.setSize(this.canvas.width, this.canvas.height);
+              this.renderer.setPixelRatio(
+                Math.min(
+                  window.devicePixelRatio,
+                  this._getQualitySetting('maxPixelRatio')
+                )
+              );
+
+              console.log(
+                `SceneRenderer initialized with quality: ${this.options.quality}`
+              );
+            } catch (initError) {
+              console.error('Critical error initializing Three.js:', initError);
+              this._showInitializationError(initError);
+              throw initError;
+            }
+          }
+
+          /**
+           * Show WebGL not available error message
+           * @private
+           */
+          _showWebGLError() {
+            const debugInfo = document.getElementById('debugInfo');
+            if (debugInfo) {
+              debugInfo.innerHTML = `
+                <div style="color: #ff4444; font-weight: bold;">
+                  ERROR: WebGL Not Available
+                </div>
+                <div style="margin-top: 8px;">
+                  Your browser does not support WebGL, which is required for 3D rendering.
+                  <br/>Please use a modern browser like Chrome, Firefox, or Edge.
+                </div>
+              `;
+              debugInfo.style.display = 'block';
+            }
+          }
+
+          /**
+           * Show WebGL context lost error message
+           * @private
+           */
+          _showContextLostError() {
+            const debugInfo = document.getElementById('debugInfo');
+            if (debugInfo) {
+              debugInfo.innerHTML = `
+                <div style="color: #ff8844; font-weight: bold;">
+                  WARNING: WebGL Context Lost
+                </div>
+                <div style="margin-top: 8px;">
+                  The WebGL context was lost. Attempting to restore...
+                </div>
+              `;
+              debugInfo.style.display = 'block';
+            }
+          }
+
+          /**
+           * Show initialization error message
+           * @private
+           */
+          _showInitializationError(error) {
+            const debugInfo = document.getElementById('debugInfo');
+            if (debugInfo) {
+              debugInfo.innerHTML = `
+                <div style="color: #ff4444; font-weight: bold;">
+                  ERROR: Initialization Failed
+                </div>
+                <div style="margin-top: 8px;">
+                  Failed to initialize 3D renderer: ${error.message}
+                </div>
+              `;
+              debugInfo.style.display = 'block';
+            }
+          }
+
+          /**
+           * Configure renderer settings based on quality level
+           * @private
+           */
+          _configureRenderer() {
+            // Shadow settings
+            if (
+              this.options.enableShadows &&
+              this._getQualitySetting('shadows')
+            ) {
+              this.renderer.shadowMap.enabled = true;
+              this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            }
+
+            // Tone mapping
+            this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            this.renderer.toneMappingExposure = 1.0;
+
+            // Color encoding
+            this.renderer.outputEncoding = THREE.sRGBEncoding;
+
+            // Additional settings
+            this.renderer.physicallyCorrectLights = true;
+          }
+
+          /**
+           * Get quality-specific settings
+           * @private
+           * @param {string} setting - Setting name
+           * @returns {*} Setting value
+           */
+          _getQualitySetting(setting) {
+            const qualitySettings = {
+              draft: {
+                antialias: false,
+                maxPixelRatio: 1,
+                shadows: false,
+                shadowMapSize: 1024,
+                geometrySegments: 8,
+                maxParticles: 1000,
+                postProcessing: false,
+              },
+              medium: {
+                antialias: true,
+                maxPixelRatio: 2,
+                shadows: true,
+                shadowMapSize: 2048,
+                geometrySegments: 16,
+                maxParticles: 5000,
+                postProcessing: true,
+              },
+              high: {
+                antialias: true,
+                maxPixelRatio: 2,
+                shadows: true,
+                shadowMapSize: 4096,
+                geometrySegments: 32,
+                maxParticles: 10000,
+                postProcessing: true,
+              },
+            };
+
+            const quality = this.options.quality || 'medium';
+            return (
+              qualitySettings[quality]?.[setting] ??
+              qualitySettings.medium[setting]
+            );
+          }
+
+          /**
+           * Set up viewport resize handler
+           * @private
+           */
+          _setupResizeHandler() {
+            this._resizeHandler = () => {
+              if (!this.camera || !this.renderer) return;
+
+              const width = this.canvas.clientWidth;
+              const height = this.canvas.clientHeight;
+
+              // Update camera aspect ratio
+              this.camera.aspect = width / height;
+              this.camera.updateProjectionMatrix();
+
+              // Update renderer size
+              this.renderer.setSize(width, height, false);
+
+              console.log(`Viewport resized to ${width}x${height}`);
+            };
+
+            window.addEventListener('resize', this._resizeHandler);
+
+            // Set up visibility change handler to pause/resume
+            this._visibilityHandler = () => {
+              if (document.hidden) {
+                this.pause();
+              } else {
+                this.resume();
+              }
+            };
+
+            document.addEventListener(
+              'visibilitychange',
+              this._visibilityHandler
+            );
+          }
+
+          /**
+           * Initialize Three.js scene from dream JSON
+           * @param {Object} dreamData - Dream JSON specification
+           * @param {number} width - Canvas width
+           * @param {number} height - Canvas height
+           */
+          initWithDream(dreamData, width, height) {
+            // TASK 10.3: Add error handling for initialization
+            console.log('Initializing scene with dream data...');
+
+            try {
+              // Validate dream data
+              if (!dreamData || typeof dreamData !== 'object') {
+                throw new Error('Invalid dream data: must be an object');
+              }
+
+              // Store dream data
+              this.dreamData = dreamData;
+
+              // Validate and set canvas size
+              const validWidth = Math.max(1, Math.min(width || 1920, 7680)); // Max 8K
+              const validHeight = Math.max(1, Math.min(height || 1080, 4320)); // Max 8K
+
+              this.canvas.width = validWidth;
+              this.canvas.height = validHeight;
+
+              try {
+                this.renderer.setSize(validWidth, validHeight, false);
+              } catch (rendererError) {
+                console.error('Error setting renderer size:', rendererError);
+                // Try with smaller size
+                const fallbackWidth = Math.min(validWidth, 1920);
+                const fallbackHeight = Math.min(validHeight, 1080);
+                console.warn(
+                  `Falling back to ${fallbackWidth}x${fallbackHeight}`
+                );
+                this.renderer.setSize(fallbackWidth, fallbackHeight, false);
+              }
+
+              // Update camera aspect ratio
+              this.camera.aspect = validWidth / validHeight;
+              this.camera.updateProjectionMatrix();
+
+              // Load the scene with error handling
+              try {
+                this.loadScene(dreamData);
+              } catch (sceneError) {
+                console.error('Error loading scene:', sceneError);
+                // Try to load a minimal default scene
+                console.warn('Loading minimal default scene...');
+                this.loadScene({
+                  environment: { preset: 'space' },
+                  structures: [],
+                  entities: [],
+                });
+              }
+
+              console.log(`Scene initialized: ${validWidth}x${validHeight}`);
+            } catch (error) {
+              console.error('Critical error in initWithDream:', error);
+              this._showInitializationError(error);
+              throw error;
+            }
+          }
+
+          /**
+           * Render scene at specific time (for deterministic frame generation)
+           * @param {number} timeSec - Time in seconds
+           */
+          seek(timeSec) {
+            // Update current time
+            this.currentTime = timeSec;
+
+            // Update animations
+            if (this.animationController) {
+              this.animationController.update(timeSec, this.renderObjects);
+            }
+
+            // Update camera
+            if (this.cameraController) {
+              this.cameraController.update(timeSec);
+            }
+
+            // Update shader uniforms (for animated materials)
+            if (this.materialSystem) {
+              this.materialSystem.updateShaderUniforms(timeSec);
+            }
+
+            // Render the frame
+            if (this.renderer && this.scene && this.camera) {
+              this.renderer.render(this.scene, this.camera);
+            }
+          }
+
+          /**
+           * Load scene from dream data
+           * @param {Object} dreamData - Dream JSON specification
+           */
+          loadScene(dreamData) {
+            // TASK 10.3: Add comprehensive error handling and resource management
+            console.log('Loading scene...');
+
+            try {
+              // Clear existing scene
+              try {
+                this.clearScene();
+              } catch (clearError) {
+                console.error('Error clearing scene:', clearError);
+                // Continue anyway
+              }
+
+              // Check for GPU memory before loading
+              this._checkGPUMemory();
+
+              // Initialize subsystems with error handling
+              try {
+                if (!this.assetLibrary) {
+                  this.assetLibrary = new AssetLibrary(
+                    this.scene,
+                    this.options
+                  );
+                }
+                if (!this.materialSystem) {
+                  this.materialSystem = new MaterialSystem(this.options);
+                }
+                if (!this.animationController) {
+                  this.animationController = new AnimationController();
+                }
+              } catch (subsystemError) {
+                console.error('Error initializing subsystems:', subsystemError);
+                throw new Error('Failed to initialize rendering subsystems');
+              }
+
+              // Set up environment with error handling
+              try {
+                if (dreamData.environment) {
+                  this.setupEnvironment(dreamData.environment);
+                } else {
+                  // Use default environment
+                  this.setupEnvironment({ preset: 'space' });
+                }
+              } catch (envError) {
+                console.error('Error setting up environment:', envError);
+                console.warn('Continuing with minimal environment...');
+                // Continue without environment
+              }
+
+              // Create structures with error handling
+              let structuresCreated = 0;
+              let structuresFailed = 0;
+
+              if (dreamData.structures && Array.isArray(dreamData.structures)) {
+                try {
+                  const result = this.createStructures(dreamData.structures);
+                  structuresCreated = result.created;
+                  structuresFailed = result.failed;
+                } catch (structuresError) {
+                  console.error(
+                    'Critical error creating structures:',
+                    structuresError
+                  );
+                  structuresFailed = dreamData.structures.length;
+                }
+              }
+
+              // Create entities with error handling
+              let entitiesCreated = 0;
+              let entitiesFailed = 0;
+
+              if (dreamData.entities && Array.isArray(dreamData.entities)) {
+                try {
+                  const result = this.createEntities(dreamData.entities);
+                  entitiesCreated = result.created;
+                  entitiesFailed = result.failed;
+                } catch (entitiesError) {
+                  console.error(
+                    'Critical error creating entities:',
+                    entitiesError
+                  );
+                  entitiesFailed = dreamData.entities.length;
+                }
+              }
+
+              // Set up cinematography with error handling
+              try {
+                if (dreamData.cinematography) {
+                  this.setupCinematography(dreamData.cinematography);
+                } else {
+                  // Initialize camera controller with default orbital view
+                  if (!this.cameraController) {
+                    this.cameraController = new CameraController(
+                      this.camera,
+                      this.scene
+                    );
+                  }
+                  this.cameraController.setupShots([]);
+                }
+              } catch (cameraError) {
+                console.error('Error setting up cinematography:', cameraError);
+                console.warn('Using default camera...');
+                // Initialize with default camera
+                if (!this.cameraController) {
+                  this.cameraController = new CameraController(
+                    this.camera,
+                    this.scene
+                  );
+                }
+                this.cameraController.setupShots([]);
+              }
+
+              // Log summary
+              console.log(
+                `Scene loaded: ${this.renderObjects.size} objects total`
+              );
+              if (structuresFailed > 0 || entitiesFailed > 0) {
+                console.warn(
+                  `Some objects failed to load: ${structuresFailed} structures, ${entitiesFailed} entities`
+                );
+              }
+
+              // Check if scene is empty and handle it
+              if (this.renderObjects.size === 0) {
+                console.warn('Scene is empty, no objects were created');
+                this._handleEmptyScene();
+              }
+            } catch (error) {
+              console.error('Critical error loading scene:', error);
+              // Try to recover with minimal scene
+              try {
+                console.warn('Attempting to load minimal fallback scene...');
+                this._loadMinimalScene();
+              } catch (fallbackError) {
+                console.error('Even fallback scene failed:', fallbackError);
+                throw new Error('Failed to load scene: ' + error.message);
+              }
+            }
+          }
+
+          /**
+           * Check GPU memory and adjust quality if needed
+           * @private
+           */
+          _checkGPUMemory() {
+            // TASK 10.3: Monitor GPU memory
+            try {
+              // Check if performance.memory is available (Chrome only)
+              if (performance.memory) {
+                const usedMemory = performance.memory.usedJSHeapSize;
+                const totalMemory = performance.memory.totalJSHeapSize;
+                const memoryUsagePercent = (usedMemory / totalMemory) * 100;
+
+                this.performanceStats.memoryUsage = memoryUsagePercent;
+
+                // If memory usage is high, reduce quality
+                if (memoryUsagePercent > 85 && this.autoQualityAdjustment) {
+                  console.warn(
+                    `High memory usage (${memoryUsagePercent.toFixed(
+                      1
+                    )}%), reducing quality...`
+                  );
+                  this._reduceQuality();
+                }
+              }
+            } catch (memoryError) {
+              console.warn('Could not check memory usage:', memoryError);
+            }
+          }
+
+          /**
+           * Reduce rendering quality to conserve resources
+           * @private
+           */
+          _reduceQuality() {
+            // TASK 10.3: Handle GPU memory exhaustion
+            console.log('Reducing rendering quality...');
+
+            // Reduce quality level
+            if (this.options.quality === 'high') {
+              this.options.quality = 'medium';
+              console.log('Quality reduced to medium');
+            } else if (this.options.quality === 'medium') {
+              this.options.quality = 'draft';
+              console.log('Quality reduced to draft');
+            }
+
+            // Disable shadows
+            if (this.renderer.shadowMap.enabled) {
+              this.renderer.shadowMap.enabled = false;
+              console.log('Shadows disabled');
+            }
+
+            // Reduce pixel ratio
+            this.renderer.setPixelRatio(1);
+            console.log('Pixel ratio reduced to 1');
+
+            // Update asset library quality if it exists
+            if (this.assetLibrary) {
+              this.assetLibrary.options.quality = this.options.quality;
+            }
+          }
+
+          /**
+           * Handle empty scene by showing informational message
+           * @private
+           */
+          _handleEmptyScene() {
+            // TASK 10.4: Handle empty scene
+            console.log('Handling empty scene...');
+
+            const debugInfo = document.getElementById('debugInfo');
+            if (debugInfo) {
+              debugInfo.innerHTML = `
+                <div style="color: #ffaa44; font-weight: bold;">
+                  INFO: Empty Scene
+                </div>
+                <div style="margin-top: 8px;">
+                  No objects were created in this scene.
+                  <br/>The environment is still rendered.
+                </div>
+              `;
+              debugInfo.style.display = 'block';
+            }
+          }
+
+          /**
+           * Load a minimal fallback scene
+           * @private
+           */
+          _loadMinimalScene() {
+            console.log('Loading minimal fallback scene...');
+
+            // Create a simple cube as a placeholder
+            const geometry = new THREE.BoxGeometry(10, 10, 10);
+            const material = new THREE.MeshBasicMaterial({ color: 0x888888 });
+            const cube = new THREE.Mesh(geometry, material);
+            cube.position.set(0, 0, 0);
+            this.scene.add(cube);
+
+            // Add basic lighting
+            const light = new THREE.AmbientLight(0xffffff, 0.5);
+            this.scene.add(light);
+
+            console.log('Minimal scene loaded');
+          }
+
+          /**
+           * Clear scene and dispose of all objects
+           */
+          clearScene() {
+            console.log('Clearing scene...');
+
+            // Remove all objects from scene
+            while (this.scene.children.length > 0) {
+              const object = this.scene.children[0];
+
+              // Dispose geometry and materials
+              if (object.geometry) {
+                object.geometry.dispose();
+              }
+              if (object.material) {
+                if (Array.isArray(object.material)) {
+                  object.material.forEach((mat) => mat.dispose());
+                } else {
+                  object.material.dispose();
+                }
+              }
+
+              this.scene.remove(object);
+            }
+
+            // Clear render objects map
+            this.renderObjects.clear();
+
+            // Reset subsystems
+            if (this.animationController) {
+              this.animationController = null;
+            }
+            if (this.cameraController) {
+              this.cameraController = null;
+            }
+
+            console.log('Scene cleared');
+          }
+
+          /**
+           * Set up environment with skybox, lighting, and atmospheric effects
+           * @param {Object} environment - Environment configuration
+           */
+          setupEnvironment(environment) {
+            console.log('Setting up environment...', environment);
+
+            if (!environment) {
+              console.warn(
+                'No environment configuration provided, using defaults'
+              );
+              environment = {};
+            }
+
+            // Initialize material system if not already created
+            if (!this.materialSystem) {
+              this.materialSystem = new MaterialSystem(this.options);
+            }
+
+            // Set up skybox
+            this._setupSkybox(environment);
+
+            // Set up lighting
+            this._setupLighting(environment);
+
+            // Set up atmospheric effects (fog)
+            this._setupAtmosphere(environment);
+
+            console.log('Environment setup complete');
+          }
+
+          /**
+           * Set up skybox based on environment configuration
+           * @private
+           * @param {Object} environment - Environment configuration
+           */
+          _setupSkybox(environment) {
+            // Determine skybox type from environment preset or explicit skybox setting
+            let skyboxType = environment.skybox;
+
+            // Map environment presets to skybox types if no explicit skybox specified
+            if (!skyboxType && environment.preset) {
+              const presetToSkybox = {
+                space: 'galaxy',
+                underwater: 'underwater',
+                forest: 'void', // Forest uses simple void with green tint
+                desert: 'sunset',
+                city: 'void',
+                dusk: 'sunset',
+                dawn: 'sunset',
+                night: 'void',
+                void: 'void',
+              };
+              skyboxType = presetToSkybox[environment.preset] || 'void';
+            }
+
+            // Default to void if nothing specified
+            skyboxType = skyboxType || 'void';
+
+            console.log(`Creating skybox: ${skyboxType}`);
+
+            // Create skybox geometry (large sphere)
+            const skyboxGeometry = new THREE.SphereGeometry(5000, 32, 32);
+
+            // Create skybox material based on type
+            let skyboxMaterial;
+            switch (skyboxType.toLowerCase()) {
+              case 'galaxy':
+                skyboxMaterial = this.materialSystem.createGalaxySkybox();
+                break;
+              case 'nebula':
+                skyboxMaterial = this.materialSystem.createNebulaSkybox();
+                break;
+              case 'sunset':
+                skyboxMaterial = this.materialSystem.createSunsetSkybox();
+                break;
+              case 'underwater':
+                skyboxMaterial = this.materialSystem.createUnderwaterSkybox();
+                break;
+              case 'void':
+              default:
+                skyboxMaterial = this.materialSystem.createVoidSkybox();
+                break;
+            }
+
+            // Create skybox mesh
+            const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
+            skybox.name = 'skybox';
+
+            // Add to scene
+            this.scene.add(skybox);
+
+            // Update scene background color if specified
+            if (environment.skyColor) {
+              try {
+                this.scene.background = new THREE.Color(environment.skyColor);
+              } catch (error) {
+                console.warn(
+                  `Invalid skyColor: ${environment.skyColor}, using default`
+                );
+                this.scene.background = new THREE.Color(0x000011);
+              }
+            }
+
+            console.log(`Skybox created: ${skyboxType}`);
+          }
+
+          /**
+           * Set up lighting based on environment configuration
+           * @private
+           * @param {Object} environment - Environment configuration
+           */
+          _setupLighting(environment) {
+            const lighting = environment.lighting || {};
+
+            // Create ambient light
+            const ambientIntensity =
+              lighting.ambient !== undefined ? lighting.ambient : 0.4;
+            const ambientLight = new THREE.AmbientLight(
+              0xffffff,
+              ambientIntensity
+            );
+            ambientLight.name = 'ambientLight';
+            this.scene.add(ambientLight);
+            console.log(
+              `Ambient light created with intensity: ${ambientIntensity}`
+            );
+
+            // Create directional light (sun-like)
+            if (lighting.directional) {
+              const dirLight = lighting.directional;
+              const intensity =
+                dirLight.intensity !== undefined ? dirLight.intensity : 1.0;
+              const position = dirLight.position || [100, 100, 50];
+              const color = dirLight.color || '#ffffff';
+
+              let lightColor;
+              try {
+                lightColor = new THREE.Color(color);
+              } catch (error) {
+                console.warn(`Invalid light color: ${color}, using white`);
+                lightColor = new THREE.Color(0xffffff);
+              }
+
+              const directionalLight = new THREE.DirectionalLight(
+                lightColor,
+                intensity
+              );
+              directionalLight.position.set(
+                position[0],
+                position[1],
+                position[2]
+              );
+              directionalLight.name = 'directionalLight';
+
+              // Configure shadows if enabled
+              if (
+                this.options.enableShadows &&
+                this._getQualitySetting('shadows')
+              ) {
+                directionalLight.castShadow = true;
+
+                // Shadow map settings based on quality
+                const shadowMapSize =
+                  this._getQualitySetting('shadowMapSize') || 2048;
+                directionalLight.shadow.mapSize.width = shadowMapSize;
+                directionalLight.shadow.mapSize.height = shadowMapSize;
+
+                // Shadow camera bounds
+                const shadowCameraBounds = 100;
+                directionalLight.shadow.camera.left = -shadowCameraBounds;
+                directionalLight.shadow.camera.right = shadowCameraBounds;
+                directionalLight.shadow.camera.top = shadowCameraBounds;
+                directionalLight.shadow.camera.bottom = -shadowCameraBounds;
+                directionalLight.shadow.camera.near = 0.5;
+                directionalLight.shadow.camera.far = 500;
+
+                // Shadow bias to prevent artifacts
+                directionalLight.shadow.bias = -0.0001;
+
+                console.log(
+                  `Directional light shadows enabled (${shadowMapSize}x${shadowMapSize})`
+                );
+              }
+
+              this.scene.add(directionalLight);
+              console.log(
+                `Directional light created at [${position.join(', ')}]`
+              );
+            } else {
+              // Add default directional light if none specified
+              const defaultLight = new THREE.DirectionalLight(0xffffff, 0.8);
+              defaultLight.position.set(100, 100, 50);
+              defaultLight.name = 'directionalLight';
+
+              if (
+                this.options.enableShadows &&
+                this._getQualitySetting('shadows')
+              ) {
+                defaultLight.castShadow = true;
+                defaultLight.shadow.mapSize.width = 2048;
+                defaultLight.shadow.mapSize.height = 2048;
+                defaultLight.shadow.camera.left = -100;
+                defaultLight.shadow.camera.right = 100;
+                defaultLight.shadow.camera.top = 100;
+                defaultLight.shadow.camera.bottom = -100;
+                defaultLight.shadow.camera.near = 0.5;
+                defaultLight.shadow.camera.far = 500;
+                defaultLight.shadow.bias = -0.0001;
+              }
+
+              this.scene.add(defaultLight);
+              console.log('Default directional light created');
+            }
+          }
+
+          /**
+           * Set up atmospheric effects (fog)
+           * @private
+           * @param {Object} environment - Environment configuration
+           */
+          _setupAtmosphere(environment) {
+            // Set up fog if specified
+            if (environment.fog !== undefined && environment.fog > 0) {
+              const fogDensity = Math.max(0, Math.min(1, environment.fog));
+
+              // Calculate fog distances based on density
+              // Higher density = closer fog
+              const near = 50 * (1 - fogDensity * 0.8);
+              const far = 1000 * (1 - fogDensity * 0.5);
+
+              // Determine fog color
+              let fogColor;
+              if (environment.skyColor) {
+                try {
+                  fogColor = new THREE.Color(environment.skyColor);
+                } catch (error) {
+                  console.warn(
+                    `Invalid fog color: ${environment.skyColor}, using default`
+                  );
+                  fogColor = new THREE.Color(0x000011);
+                }
+              } else {
+                // Use scene background color or default
+                fogColor = this.scene.background || new THREE.Color(0x000011);
+              }
+
+              // Create fog
+              this.scene.fog = new THREE.Fog(fogColor, near, far);
+              console.log(
+                `Fog created with density: ${fogDensity} (near: ${near.toFixed(
+                  1
+                )}, far: ${far.toFixed(1)})`
+              );
+            } else {
+              // Remove fog if it exists
+              this.scene.fog = null;
+              console.log('No fog applied');
+            }
+          }
+
+          /**
+           * Create structures with error handling
+           * @param {Array} structures - Array of structure specifications
+           * @returns {Object} Object with created and failed counts
+           */
+          createStructures(structures) {
+            // TASK 10.3: Add error handling for asset creation failures
+            console.log(`Creating ${structures.length} structures...`);
+
+            let created = 0;
+            let failed = 0;
+
+            if (!this.assetLibrary) {
+              console.error('AssetLibrary not initialized');
+              return { created: 0, failed: structures.length };
+            }
+
+            for (const structure of structures) {
+              try {
+                // Create the structure mesh
+                const mesh = this.assetLibrary.createStructure(structure);
+
+                if (!mesh) {
+                  console.error(
+                    `Failed to create structure ${structure.id || 'unknown'}`
+                  );
+                  failed++;
+                  continue;
+                }
+
+                // Set name for identification
+                if (structure.id) {
+                  mesh.name = structure.id;
+                }
+
+                // Add to scene
+                this.scene.add(mesh);
+
+                // Store in render objects map
+                this.renderObjects.set(structure.id || `structure_${created}`, {
+                  mesh: mesh,
+                  structure: structure,
+                  type: 'structure',
+                });
+
+                // Register animation if specified
+                if (structure.animation && this.animationController) {
+                  try {
+                    this.animationController.addAnimation(
+                      structure.id || `structure_${created}`,
+                      structure.animation
+                    );
+                  } catch (animError) {
+                    console.warn(
+                      `Failed to add animation for structure ${structure.id}:`,
+                      animError
+                    );
+                  }
+                }
+
+                created++;
+              } catch (error) {
+                console.error(
+                  `Error creating structure ${structure.id || 'unknown'}:`,
+                  error
+                );
+                failed++;
+
+                // Check if we should stop due to too many failures
+                if (failed > 10 && failed > structures.length * 0.5) {
+                  console.error(
+                    'Too many structure creation failures, stopping...'
+                  );
+                  break;
+                }
+              }
+            }
+
+            console.log(
+              `Structures created: ${created} succeeded, ${failed} failed`
+            );
+            return { created, failed };
+          }
+
+          /**
+           * Create entities with error handling
+           * @param {Array} entities - Array of entity specifications
+           * @returns {Object} Object with created and failed counts
+           */
+          createEntities(entities) {
+            // TASK 10.3: Add error handling for asset creation failures
+            console.log(`Creating ${entities.length} entities...`);
+
+            let created = 0;
+            let failed = 0;
+
+            if (!this.assetLibrary) {
+              console.error('AssetLibrary not initialized');
+              return { created: 0, failed: entities.length };
+            }
+
+            for (const entity of entities) {
+              try {
+                // Create the entity object
+                const object = this.assetLibrary.createEntity(entity);
+
+                if (!object) {
+                  console.error(
+                    `Failed to create entity ${entity.id || 'unknown'}`
+                  );
+                  failed++;
+                  continue;
+                }
+
+                // Set name for identification
+                if (entity.id) {
+                  object.name = entity.id;
+                }
+
+                // Add to scene
+                this.scene.add(object);
+
+                // Store in render objects map
+                this.renderObjects.set(entity.id || `entity_${created}`, {
+                  mesh: object,
+                  entity: entity,
+                  type: 'entity',
+                  particleSystem: object, // For particle systems
+                });
+
+                created++;
+              } catch (error) {
+                console.error(
+                  `Error creating entity ${entity.id || 'unknown'}:`,
+                  error
+                );
+                failed++;
+
+                // Check if we should stop due to too many failures
+                if (failed > 10 && failed > entities.length * 0.5) {
+                  console.error(
+                    'Too many entity creation failures, stopping...'
+                  );
+                  break;
+                }
+              }
+            }
+
+            console.log(
+              `Entities created: ${created} succeeded, ${failed} failed`
+            );
+            return { created, failed };
+          }
+
+          /**
+           * Set up cinematography
+           * @param {Object} cinematography - Cinematography configuration
+           */
+          setupCinematography(cinematography) {
+            console.log('Setting up cinematography...', cinematography);
+
+            // Initialize camera controller if not already created
+            if (!this.cameraController) {
+              this.cameraController = new CameraController(
+                this.camera,
+                this.scene
+              );
+            }
+
+            // Set up shots from cinematography configuration
+            if (cinematography.shots && Array.isArray(cinematography.shots)) {
+              this.cameraController.setupShots(cinematography.shots);
+            } else {
+              // No shots specified, will use default orbital view
+              this.cameraController.setupShots([]);
+            }
+          }
+
+          /**
+           * Start animation loop
+           */
+          startAnimation() {
+            if (this.isAnimating) {
+              console.log('Animation already running');
+              return;
+            }
+
+            console.log('Starting animation loop...');
+            this.isAnimating = true;
+            this.lastFrameTime = performance.now();
+            this.frameCount = 0;
+            this._animate();
+          }
+
+          /**
+           * Animation loop (internal)
+           * @private
+           */
+          _animate() {
+            if (!this.isAnimating) return;
+
+            // Request next frame
+            this.animationFrameId = requestAnimationFrame(() =>
+              this._animate()
+            );
+
+            // Calculate delta time
+            const currentTime = performance.now();
+            const deltaTime = (currentTime - this.lastFrameTime) / 1000; // Convert to seconds
+            this.lastFrameTime = currentTime;
+
+            // Update current time
+            this.currentTime += deltaTime;
+
+            // Performance monitoring
+            this.frameCount++;
+            this._updatePerformanceStats(deltaTime);
+
+            // Check performance periodically
+            if (this.frameCount % this.performanceCheckInterval === 0) {
+              this._checkPerformance();
+            }
+
+            // Update subsystems
+            this._updateSubsystems(this.currentTime);
+
+            // Render the scene
+            if (this.renderer && this.scene && this.camera) {
+              this.renderer.render(this.scene, this.camera);
+            }
+          }
+
+          /**
+           * Update all subsystems
+           * @private
+           * @param {number} time - Current time in seconds
+           */
+          _updateSubsystems(time) {
+            // Update animations
+            if (this.animationController) {
+              this.animationController.update(time, this.renderObjects);
+            }
+
+            // Update camera
+            if (this.cameraController) {
+              this.cameraController.update(time);
+            }
+
+            // Update shader uniforms (for animated materials)
+            if (this.materialSystem) {
+              this.materialSystem.updateShaderUniforms(time);
+            }
+          }
+
+          /**
+           * Pause rendering
+           */
+          pause() {
+            if (!this.isAnimating) return;
+
+            console.log('Pausing animation...');
+            this.isAnimating = false;
+
+            if (this.animationFrameId) {
+              cancelAnimationFrame(this.animationFrameId);
+              this.animationFrameId = null;
+            }
+          }
+
+          /**
+           * Resume rendering
+           */
+          resume() {
+            if (this.isAnimating) return;
+
+            console.log('Resuming animation...');
+            this.isAnimating = true;
+            this.lastFrameTime = performance.now();
+            this._animate();
+          }
+
+          /**
+           * Update performance statistics
+           * @private
+           * @param {number} deltaTime - Time since last frame in seconds
+           */
+          _updatePerformanceStats(deltaTime) {
+            // Calculate FPS
+            const fps = 1 / deltaTime;
+            this.performanceStats.fps = fps;
+            this.performanceStats.frameTime = deltaTime * 1000; // Convert to ms
+
+            // Track low FPS occurrences
+            if (fps < this.fpsWarningThreshold) {
+              this.performanceStats.lowFpsCount++;
+            }
+          }
+
+          /**
+           * Check performance and log warnings or adjust quality
+           * @private
+           */
+          _checkPerformance() {
+            const stats = this.performanceStats;
+
+            // Log FPS warning if below threshold
+            if (stats.fps < this.fpsWarningThreshold) {
+              console.warn(
+                `Low FPS detected: ${stats.fps.toFixed(
+                  1
+                )} FPS (frame time: ${stats.frameTime.toFixed(2)}ms)`
+              );
+            }
+
+            // Check memory usage if available
+            if (performance.memory) {
+              const memoryMB =
+                performance.memory.usedJSHeapSize / (1024 * 1024);
+              stats.memoryUsage = memoryMB;
+
+              // Log memory warning if usage is high
+              if (memoryMB > 512) {
+                console.warn(
+                  `High memory usage detected: ${memoryMB.toFixed(1)} MB`
+                );
+              }
+
+              // Auto-adjust quality if enabled and performance is poor
+              if (
+                this.autoQualityAdjustment &&
+                stats.lowFpsCount > 10 &&
+                this.options.quality !== 'draft'
+              ) {
+                this._adjustQualityDown();
+              }
+            }
+
+            // Log performance stats periodically
+            if (this.frameCount % (this.performanceCheckInterval * 10) === 0) {
+              console.log(
+                `Performance Stats - FPS: ${stats.fps.toFixed(
+                  1
+                )}, Frame Time: ${stats.frameTime.toFixed(
+                  2
+                )}ms, Memory: ${stats.memoryUsage.toFixed(1)}MB`
+              );
+            }
+
+            // Reset low FPS counter periodically
+            if (this.frameCount % (this.performanceCheckInterval * 5) === 0) {
+              stats.lowFpsCount = 0;
+            }
+          }
+
+          /**
+           * Automatically reduce quality level to improve performance
+           * @private
+           */
+          _adjustQualityDown() {
+            const currentQuality = this.options.quality;
+            let newQuality;
+
+            if (currentQuality === 'high') {
+              newQuality = 'medium';
+            } else if (currentQuality === 'medium') {
+              newQuality = 'draft';
+            } else {
+              // Already at lowest quality
+              console.warn(
+                'Performance issues detected but already at lowest quality level'
+              );
+              return;
+            }
+
+            console.warn(
+              `Auto-adjusting quality from ${currentQuality} to ${newQuality} due to performance issues`
+            );
+
+            // Update quality setting
+            this.options.quality = newQuality;
+
+            // Reconfigure renderer with new quality settings
+            this._configureRenderer();
+
+            // Reset low FPS counter
+            this.performanceStats.lowFpsCount = 0;
+
+            // Note: Existing objects won't be updated, but new objects will use the new quality
+            // For a full quality change, the scene would need to be reloaded
+          }
+
+          /**
+           * Get current performance statistics
+           * @returns {Object} Performance statistics
+           */
+          getPerformanceStats() {
+            return {
+              fps: this.performanceStats.fps,
+              frameTime: this.performanceStats.frameTime,
+              memoryUsage: this.performanceStats.memoryUsage,
+              quality: this.options.quality,
+              objectCount: this.renderObjects.size,
+            };
+          }
+
+          /**
+           * Clean up all resources
+           */
+          dispose() {
+            console.log('Disposing SceneRenderer resources...');
+
+            // Stop animation
+            this.pause();
+            if (this.animationFrameId) {
+              cancelAnimationFrame(this.animationFrameId);
+              this.animationFrameId = null;
+            }
+
+            // Remove resize handler
+            if (this._resizeHandler) {
+              window.removeEventListener('resize', this._resizeHandler);
+              this._resizeHandler = null;
+            }
+
+            // Remove visibility handler
+            if (this._visibilityHandler) {
+              document.removeEventListener(
+                'visibilitychange',
+                this._visibilityHandler
+              );
+              this._visibilityHandler = null;
+            }
+
+            // Dispose subsystems
+            if (
+              this.assetLibrary &&
+              typeof this.assetLibrary.dispose === 'function'
+            ) {
+              this.assetLibrary.dispose();
+            }
+            if (
+              this.materialSystem &&
+              typeof this.materialSystem.dispose === 'function'
+            ) {
+              this.materialSystem.dispose();
+            }
+
+            // Dispose scene objects
+            if (this.scene) {
+              this.scene.traverse((object) => {
+                if (object.geometry) {
+                  object.geometry.dispose();
+                }
+                if (object.material) {
+                  if (Array.isArray(object.material)) {
+                    object.material.forEach((mat) => mat.dispose());
+                  } else {
+                    object.material.dispose();
+                  }
+                }
+              });
+              this.scene.clear();
+            }
+
+            // Dispose renderer
+            if (this.renderer) {
+              this.renderer.dispose();
+              this.renderer = null;
+            }
+
+            // Clear state
+            this.renderObjects.clear();
+            this.dreamData = null;
+
+            console.log('SceneRenderer disposed');
+          }
+        }
+
+        // Global renderer instance
+        let renderer = null;
+
+        /**
+         * Initialize scene with dream data
+         * @param {Object} dreamData - Dream JSON specification
+         * @param {number} width - Canvas width
+         * @param {number} height - Canvas height
+         */
+        window.initWithDream = function (dreamData, width, height) {
+          console.log('initWithDream called', { width, height });
+
+          try {
+            // Create renderer instance
+            renderer = new SceneRenderer(canvas, {
+              quality: 'medium',
+              enableShadows: true,
+              enablePostProcessing: false,
+            });
+
+            // Initialize with dream data
+            renderer.initWithDream(dreamData, width, height);
+
+            // Render initial frame
+            renderer.seek(0);
+
+            console.log('Scene initialized successfully');
+            updateDebugInfo(0, dreamData);
+          } catch (error) {
+            console.error('Error initializing scene:', error);
+            document.getElementById('debugInfo').textContent =
+              'ERROR: ' + error.message;
+          }
+        };
+
+        /**
+         * Seek to specific time and render frame
+         * @param {number} timeSec - Time in seconds
+         */
+        window.seek = function (timeSec) {
+          if (!renderer) {
+            console.warn('Renderer not initialized, call initWithDream first');
+            return;
+          }
+
+          try {
+            renderer.seek(timeSec);
+            updateDebugInfo(timeSec, renderer.dreamData);
+          } catch (error) {
+            console.error('Error seeking to time:', timeSec, error);
+          }
+        };
+
+        /**
+         * Update debug information display
+         * @param {number} time - Current time
+         * @param {Object} dreamData - Dream data
+         */
+        function updateDebugInfo(time, dreamData) {
+          const debugEl = document.getElementById('debugInfo');
+          if (!debugEl || !dreamData) return;
+
+          const structureCount = dreamData.structures
+            ? dreamData.structures.length
+            : 0;
+          const entityCount = dreamData.entities
+            ? dreamData.entities.length
+            : 0;
+          const quality = renderer ? renderer.options.quality : 'unknown';
+
+          debugEl.textContent = `3D Renderer | time: ${time.toFixed(
+            2
+          )}s | structures: ${structureCount} | entities: ${entityCount} | quality: ${quality}`;
+        }
+
+        console.log('3D Render Template ready');
+      })();
+    </script>
+  </body>
+</html>

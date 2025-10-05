@@ -1,0 +1,278 @@
+{
+  "title": "Cinematography Showcase",
+  "renderMode": "3d",
+  "style": "cinematic",
+  "quality": "high",
+
+  "environment": {
+    "preset": "sunset",
+    "skybox": "sunset",
+    "lighting": {
+      "ambient": 0.5,
+      "directional": {
+        "intensity": 1.2,
+        "position": [100, 50, 50],
+        "color": "#ffaa66"
+      }
+    },
+    "fog": 0.3
+  },
+
+  "structures": [
+    {
+      "id": "center_crystal",
+      "type": "crystal",
+      "pos": [0, 10, 0],
+      "scale": 15,
+      "material": {
+        "color": "#ff88ff",
+        "opacity": 0.8,
+        "metalness": 0.9
+      },
+      "animation": {
+        "type": "rotate",
+        "speed": 0.2,
+        "axis": "y"
+      },
+      "features": ["glowing_edges", "emissive"]
+    },
+    {
+      "id": "tower_north",
+      "type": "tower",
+      "pos": [0, 0, -50],
+      "scale": 20,
+      "material": {
+        "color": "#666688",
+        "metalness": 0.7
+      },
+      "features": ["glowing_edges"]
+    },
+    {
+      "id": "tower_south",
+      "type": "tower",
+      "pos": [0, 0, 50],
+      "scale": 18,
+      "material": {
+        "color": "#666688",
+        "metalness": 0.7
+      },
+      "features": ["glowing_edges"]
+    },
+    {
+      "id": "tower_east",
+      "type": "tower",
+      "pos": [50, 0, 0],
+      "scale": 22,
+      "material": {
+        "color": "#666688",
+        "metalness": 0.7
+      },
+      "features": ["glowing_edges"]
+    },
+    {
+      "id": "tower_west",
+      "type": "tower",
+      "pos": [-50, 0, 0],
+      "scale": 19,
+      "material": {
+        "color": "#666688",
+        "metalness": 0.7
+      },
+      "features": ["glowing_edges"]
+    },
+    {
+      "id": "bridge_ns",
+      "type": "bridge",
+      "pos": [0, 12, 0],
+      "scale": 45,
+      "rotation": [0, 0, 0],
+      "material": {
+        "color": "#888888",
+        "metalness": 0.8
+      }
+    },
+    {
+      "id": "bridge_ew",
+      "type": "bridge",
+      "pos": [0, 12, 0],
+      "scale": 45,
+      "rotation": [0, 1.57, 0],
+      "material": {
+        "color": "#888888",
+        "metalness": 0.8
+      }
+    },
+    {
+      "id": "orb1",
+      "type": "planet",
+      "pos": [20, 25, 20],
+      "scale": 4,
+      "material": {
+        "color": "#4488ff",
+        "emissiveIntensity": 0.5
+      },
+      "animation": {
+        "type": "orbit",
+        "speed": 0.5,
+        "amplitude": 25
+      },
+      "features": ["emissive"]
+    },
+    {
+      "id": "orb2",
+      "type": "planet",
+      "pos": [-20, 25, -20],
+      "scale": 3.5,
+      "material": {
+        "color": "#ff8844",
+        "emissiveIntensity": 0.5
+      },
+      "animation": {
+        "type": "orbit",
+        "speed": 0.6,
+        "amplitude": 25
+      },
+      "features": ["emissive"]
+    },
+    {
+      "id": "orb3",
+      "type": "planet",
+      "pos": [20, 25, -20],
+      "scale": 4.5,
+      "material": {
+        "color": "#88ff44",
+        "emissiveIntensity": 0.5
+      },
+      "animation": {
+        "type": "orbit",
+        "speed": 0.4,
+        "amplitude": 25
+      },
+      "features": ["emissive"]
+    },
+    {
+      "id": "bird1",
+      "type": "bird",
+      "pos": [30, 20, 0],
+      "scale": 2,
+      "material": {
+        "color": "#ffffff"
+      },
+      "animation": {
+        "type": "orbit",
+        "speed": 1.2,
+        "amplitude": 35
+      }
+    },
+    {
+      "id": "bird2",
+      "type": "bird",
+      "pos": [-30, 22, 0],
+      "scale": 2,
+      "material": {
+        "color": "#ffffff"
+      },
+      "animation": {
+        "type": "orbit",
+        "speed": 1.0,
+        "amplitude": 35
+      }
+    }
+  ],
+
+  "entities": [
+    {
+      "id": "magic_particles",
+      "type": "particle_stream",
+      "count": 800,
+      "params": {
+        "speed": 1.5,
+        "color": "#ff88ff",
+        "glow": 0.7
+      }
+    },
+    {
+      "id": "light_orbs",
+      "type": "floating_orbs",
+      "count": 150,
+      "params": {
+        "size": 1.0,
+        "color": "#ffff88",
+        "glow": 0.9
+      }
+    }
+  ],
+
+  "cinematography": {
+    "durationSec": 45,
+    "shots": [
+      {
+        "type": "establish",
+        "startTime": 0,
+        "duration": 6,
+        "position": [0, 80, 150],
+        "target": [0, 10, 0],
+        "easing": "ease_in"
+      },
+      {
+        "type": "orbital",
+        "startTime": 6,
+        "duration": 10,
+        "target": "center_crystal",
+        "distance": 40,
+        "speed": 0.5,
+        "easing": "linear"
+      },
+      {
+        "type": "flythrough",
+        "startTime": 16,
+        "duration": 8,
+        "path": [
+          [40, 15, 40],
+          [0, 20, 50],
+          [-40, 15, 40],
+          [-50, 20, 0],
+          [-40, 15, -40],
+          [0, 20, -50],
+          [40, 15, -40],
+          [50, 20, 0]
+        ],
+        "speed": 1.0,
+        "easing": "ease_in_out"
+      },
+      {
+        "type": "close_up",
+        "startTime": 24,
+        "duration": 6,
+        "target": "center_crystal",
+        "distance": 25,
+        "easing": "ease_in"
+      },
+      {
+        "type": "close_up",
+        "startTime": 30,
+        "duration": 4,
+        "target": "orb1",
+        "distance": 12,
+        "easing": "ease_in_out"
+      },
+      {
+        "type": "close_up",
+        "startTime": 34,
+        "duration": 4,
+        "target": "tower_north",
+        "distance": 35,
+        "easing": "ease_in_out"
+      },
+      {
+        "type": "pull_back",
+        "startTime": 38,
+        "duration": 7,
+        "target": [0, 10, 0],
+        "startDistance": 35,
+        "endDistance": 150,
+        "easing": "ease_out"
+      }
+    ]
+  }
+}

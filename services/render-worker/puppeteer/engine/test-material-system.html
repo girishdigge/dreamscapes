@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MaterialSystem Test</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        font-family: Arial, sans-serif;
+      }
+      #info {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: white;
+        background: rgba(0, 0, 0, 0.7);
+        padding: 10px;
+        border-radius: 5px;
+        z-index: 100;
+      }
+      #canvas {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="info">
+      <h3>MaterialSystem Test</h3>
+      <p>Testing all material types and skyboxes</p>
+      <div id="status">Initializing...</div>
+    </div>
+    <canvas id="canvas"></canvas>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r160/three.min.js"></script>
+    <script src="MaterialSystem.js"></script>
+
+    <script>
+      const canvas = document.getElementById('canvas');
+      const statusDiv = document.getElementById('status');
+
+      // Setup scene
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        10000
+      );
+      camera.position.set(0, 0, 50);
+
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+      // Create MaterialSystem
+      const materialSystem = new MaterialSystem();
+      let testsPassed = 0;
+      let testsFailed = 0;
+
+      // Test 1: PBR Material
+      try {
+        const pbrMaterial = materialSystem.createPBRMaterial({
+          color: '#ff0000',
+          metalness: 0.8,
+          roughness: 0.2,
+        });
+        const sphere1 = new THREE.Mesh(
+          new THREE.SphereGeometry(5, 32, 32),
+          pbrMaterial
+        );
+        sphere1.position.set(-20, 10, 0);
+        scene.add(sphere1);
+        testsPassed++;
+        console.log('✓ PBR Material created');
+      } catch (e) {
+        testsFailed++;
+        console.error('✗ PBR Material failed:', e);
+      }
+
+      // Test 2: Emissive Material
+      try {
+        const emissiveMaterial = materialSystem.createEmissiveMaterial({
+          color: '#00ff00',
+          emissiveIntensity: 1.0,
+        });
+        const sphere2 = new THREE.Mesh(
+          new THREE.SphereGeometry(5, 32, 32),
+          emissiveMaterial
+        );
+        sphere2.position.set(0, 10, 0);
+        scene.add(sphere2);
+        testsPassed++;
+        console.log('✓ Emissive Material created');
+      } catch (e) {
+        testsFailed++;
+        console.error('✗ Emissive Material failed:', e);
+      }
+
+      // Test 3: Transparent Material
+      try {
+        const transparentMaterial = materialSystem.createTransparentMaterial({
+          color: '#0088ff',
+          opacity: 0.5,
+          transmission: 0.9,
+        });
+        const sphere3 = new THREE.Mesh(
+          new THREE.SphereGeometry(5, 32, 32),
+          transparentMaterial
+        );
+        sphere3.position.set(20, 10, 0);
+        scene.add(sphere3);
+        testsPassed++;
+        console.log('✓ Transparent Material created');
+      } catch (e) {
+        testsFailed++;
+        console.error('✗ Transparent Material failed:', e);
+      }
+
+      // Test 4: Water Material
+      try {
+        const waterMaterial = materialSystem.createWaterMaterial({
+          color: '#0077be',
+          opacity: 0.8,
+        });
+        const plane = new THREE.Mesh(
+          new THREE.PlaneGeometry(30, 30, 32, 32),
+          waterMaterial
+        );
+        plane.position.set(0, -10, 0);
+        plane.rotation.x = -Math.PI / 2;
+        scene.add(plane);
+        testsPassed++;
+        console.log('✓ Water Material created');
+      } catch (e) {
+        testsFailed++;
+        console.error('✗ Water Material failed:', e);
+      }
+
+      // Test 5: Galaxy Skybox
+      try {
+        const galaxySkybox = materialSystem.createGalaxySkybox();
+        const skyboxGeometry = new THREE.BoxGeometry(1000, 1000, 1000);
+        const skyboxMesh = new THREE.Mesh(skyboxGeometry, galaxySkybox);
+        scene.add(skyboxMesh);
+        testsPassed++;
+        console.log('✓ Galaxy Skybox created');
+      } catch (e) {
+        testsFailed++;
+        console.error('✗ Galaxy Skybox failed:', e);
+      }
+
+      // Test 6: Material Caching
+      try {
+        const cached1 = materialSystem.getCachedMaterial('test', () =>
+          materialSystem.createPBRMaterial({ color: '#ffffff' })
+        );
+        const cached2 = materialSystem.getCachedMaterial('test', () =>
+          materialSystem.createPBRMaterial({ color: '#000000' })
+        );
+        if (cached1 === cached2) {
+          testsPassed++;
+          console.log('✓ Material Caching works');
+        } else {
+          throw new Error('Caching returned different materials');
+        }
+      } catch (e) {
+        testsFailed++;
+        console.error('✗ Material Caching failed:', e);
+      }
+
+      // Add lighting
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+      scene.add(ambientLight);
+
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      directionalLight.position.set(10, 10, 10);
+      scene.add(directionalLight);
+
+      // Animation loop
+      let time = 0;
+      function animate() {
+        requestAnimationFrame(animate);
+
+        time += 0.016; // ~60fps
+
+        // Test 7: Shader Uniform Updates
+        materialSystem.updateShaderUniforms(time);
+
+        // Rotate camera
+        camera.position.x = Math.cos(time * 0.1) * 50;
+        camera.position.z = Math.sin(time * 0.1) * 50;
+        camera.lookAt(0, 0, 0);
+
+        renderer.render(scene, camera);
+      }
+
+      // Update status
+      statusDiv.innerHTML = `
+      Tests Passed: ${testsPassed}<br>
+      Tests Failed: ${testsFailed}<br>
+      Status: ${
+        testsFailed === 0 ? '✓ All tests passed!' : '✗ Some tests failed'
+      }
+    `;
+
+      // Handle resize
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // Start animation
+      animate();
+      console.log(
+        'MaterialSystem test complete:',
+        testsPassed,
+        'passed,',
+        testsFailed,
+        'failed'
+      );
+    </script>
+  </body>
+</html>

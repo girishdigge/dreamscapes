@@ -1,5 +1,131 @@
 {
-  "text": "Neon butterflies dance around a crystalline tower in a digital void, their wings leaving trails of code that forms into blooming flowers",
-  "style": "cyberpunk", 
-  "expectedDuration": 25
+  "id": "550e8400-e29b-41d4-a716-446655440002",
+  "title": "Neon-lit garden where digital flowers bloom in binary code",
+  "style": "cyberpunk",
+  "created": "2025-01-15T11:00:00.000Z",
+  "source": "mcp-gateway",
+  "environment": {
+    "preset": "night",
+    "fog": 0.6,
+    "skyColor": "#0A0A1A",
+    "ambientLight": 0.3
+  },
+  "structures": [
+    {
+      "id": "central_nexus",
+      "type": "energy_nexus",
+      "pos": [0, 0, 0],
+      "scale": 4.0,
+      "features": ["emissive", "pulsating", "particle_effects"]
+    },
+    {
+      "id": "flower_tower_1",
+      "type": "crystal_tower",
+      "pos": [20, 0, 10],
+      "scale": 2.5,
+      "rotation": [0, 0.5, 0],
+      "features": ["glowing_edges", "emissive"]
+    },
+    {
+      "id": "flower_tower_2",
+      "type": "crystal_tower",
+      "pos": [-18, 0, -12],
+      "scale": 2.8,
+      "rotation": [0, -0.3, 0],
+      "features": ["glowing_edges", "emissive"]
+    },
+    {
+      "id": "data_tree_1",
+      "type": "organic_tree",
+      "pos": [15, 0, -15],
+      "scale": 3.0,
+      "features": ["animated_textures", "glowing_edges"]
+    },
+    {
+      "id": "data_tree_2",
+      "type": "organic_tree",
+      "pos": [-20, 0, 18],
+      "scale": 2.5,
+      "features": ["animated_textures", "glowing_edges"]
+    },
+    {
+      "id": "hologram_platform",
+      "type": "floating_platform",
+      "pos": [0, 15, 0],
+      "scale": 6.0,
+      "features": ["transparent", "emissive"]
+    }
+  ],
+  "entities": [
+    {
+      "id": "binary_particles",
+      "type": "particle_stream",
+      "count": 100,
+      "params": {
+        "speed": 2.0,
+        "glow": 0.9,
+        "size": 0.8,
+        "color": "#00FF41"
+      }
+    },
+    {
+      "id": "neon_butterflies",
+      "type": "light_butterflies",
+      "count": 40,
+      "params": {
+        "speed": 1.5,
+        "glow": 0.8,
+        "size": 1.2,
+        "color": "#FF00FF"
+      }
+    },
+    {
+      "id": "data_orbs",
+      "type": "floating_orbs",
+      "count": 25,
+      "params": {
+        "speed": 0.8,
+        "glow": 1.0,
+        "size": 1.5,
+        "color": "#00FFFF"
+      }
+    }
+  ],
+  "cinematography": {
+    "durationSec": 30,
+    "shots": [
+      {
+        "type": "establish",
+        "duration": 6,
+        "startPos": [60, 40, 60],
+        "endPos": [60, 40, 60]
+      },
+      {
+        "type": "flythrough",
+        "duration": 10,
+        "startPos": [40, 10, 40],
+        "endPos": [-40, 20, -40]
+      },
+      {
+        "type": "orbit",
+        "target": "central_nexus",
+        "duration": 8
+      },
+      {
+        "type": "close_up",
+        "target": "flower_tower_1",
+        "duration": 6
+      }
+    ]
+  },
+  "render": {
+    "res": [1920, 1080],
+    "fps": 30,
+    "quality": "high"
+  },
+  "metadata": {
+    "originalText": "Neon-lit garden where digital flowers bloom in binary code, with holographic butterflies dancing between crystalline data trees",
+    "requestedStyle": "cyberpunk",
+    "version": "1.0.0"
+  }
 }

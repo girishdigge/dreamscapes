@@ -29,9 +29,16 @@ async function renderToFrames(
   const resolution = options.resolution || [1280, 720];
   const fps = options.fps || 30;
   const duration = options.duration || 30;
+
+  // Select template based on renderMode in dream JSON
+  // Default to 2D template for backward compatibility
+  let defaultTemplate = 'render_template.html';
+  if (dream && dream.renderMode === '3d') {
+    defaultTemplate = 'render_template_3d.html';
+  }
+
   const templatePath =
-    options.templatePath ||
-    path.join(__dirname, 'templates', 'render_template.html');
+    options.templatePath || path.join(__dirname, 'templates', defaultTemplate);
 
   mkdirp.sync(framesDir);
 

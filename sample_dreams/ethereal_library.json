@@ -1,5 +1,137 @@
 {
-  "text": "A floating library where books fly around like birds, spelling out messages of hope in the sky while soft light emanates from their pages",
+  "id": "550e8400-e29b-41d4-a716-446655440003",
+  "title": "Infinite library where books float and pages turn themselves",
   "style": "ethereal",
-  "expectedDuration": 30
+  "created": "2025-01-15T11:30:00.000Z",
+  "source": "mcp-gateway",
+  "environment": {
+    "preset": "golden_hour",
+    "fog": 0.3,
+    "skyColor": "#FFE4B5",
+    "ambientLight": 0.7
+  },
+  "structures": [
+    {
+      "id": "main_library",
+      "type": "floating_library",
+      "pos": [0, 0, 0],
+      "scale": 5.0,
+      "features": ["glowing_edges", "animated_textures"]
+    },
+    {
+      "id": "reading_platform_1",
+      "type": "floating_platform",
+      "pos": [25, 10, 0],
+      "scale": 2.0,
+      "features": ["transparent"]
+    },
+    {
+      "id": "reading_platform_2",
+      "type": "floating_platform",
+      "pos": [-25, 8, 15],
+      "scale": 2.2,
+      "features": ["transparent"]
+    },
+    {
+      "id": "knowledge_spire_1",
+      "type": "crystal_spire",
+      "pos": [15, 0, -20],
+      "scale": 3.5,
+      "rotation": [0, 0.8, 0],
+      "features": ["emissive", "rotating"]
+    },
+    {
+      "id": "knowledge_spire_2",
+      "type": "crystal_spire",
+      "pos": [-18, 0, 22],
+      "scale": 3.2,
+      "rotation": [0, -0.6, 0],
+      "features": ["emissive", "rotating"]
+    },
+    {
+      "id": "portal_arch",
+      "type": "portal_arch",
+      "pos": [0, 0, -40],
+      "scale": 4.0,
+      "features": ["emissive", "particle_effects"]
+    }
+  ],
+  "entities": [
+    {
+      "id": "floating_books",
+      "type": "book_swarm",
+      "count": 60,
+      "params": {
+        "speed": 0.6,
+        "glow": 0.4,
+        "size": 1.0,
+        "color": "#F5DEB3"
+      }
+    },
+    {
+      "id": "page_particles",
+      "type": "particle_swarm",
+      "count": 100,
+      "params": {
+        "speed": 0.4,
+        "glow": 0.3,
+        "size": 0.5,
+        "color": "#FFFFFF"
+      }
+    },
+    {
+      "id": "wisdom_orbs",
+      "type": "floating_orbs",
+      "count": 20,
+      "params": {
+        "speed": 0.5,
+        "glow": 0.8,
+        "size": 1.8,
+        "color": "#FFD700"
+      }
+    }
+  ],
+  "cinematography": {
+    "durationSec": 40,
+    "shots": [
+      {
+        "type": "establish",
+        "duration": 8,
+        "startPos": [70, 50, 70],
+        "endPos": [70, 50, 70]
+      },
+      {
+        "type": "flythrough",
+        "duration": 12,
+        "startPos": [50, 20, 50],
+        "endPos": [-30, 15, -30]
+      },
+      {
+        "type": "orbit",
+        "target": "main_library",
+        "duration": 10
+      },
+      {
+        "type": "close_up",
+        "target": "portal_arch",
+        "duration": 6
+      },
+      {
+        "type": "pull_back",
+        "duration": 4,
+        "startPos": [10, 10, 10],
+        "endPos": [80, 60, 80]
+      }
+    ]
+  },
+  "render": {
+    "res": [1920, 1080],
+    "fps": 30,
+    "quality": "medium"
+  },
+  "metadata": {
+    "originalText": "Infinite library where books float and pages turn themselves, illuminated by golden light streaming through impossible architecture",
+    "requestedStyle": "ethereal",
+    "version": "1.0.0"
+  }
 }

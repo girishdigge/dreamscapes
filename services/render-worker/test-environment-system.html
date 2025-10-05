@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Environment System Test</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 20px;
+        font-family: Arial, sans-serif;
+        background: #1a1a1a;
+        color: #fff;
+      }
+      #renderCanvas {
+        width: 800px;
+        height: 600px;
+        border: 2px solid #333;
+        display: block;
+        margin: 20px auto;
+      }
+      .controls {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        background: #2a2a2a;
+        border-radius: 8px;
+      }
+      .test-result {
+        padding: 10px;
+        margin: 10px 0;
+        border-radius: 4px;
+        font-family: monospace;
+      }
+      .test-result.pass {
+        background: #2d5016;
+        border-left: 4px solid #4caf50;
+      }
+      .test-result.fail {
+        background: #5d1616;
+        border-left: 4px solid #f44336;
+      }
+      button {
+        padding: 10px 20px;
+        margin: 5px;
+        background: #4caf50;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #45a049;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 style="text-align: center">Environment System Test</h1>
+
+    <canvas id="renderCanvas" width="800" height="600"></canvas>
+
+    <div class="controls">
+      <h2>Test Controls</h2>
+      <button onclick="testGalaxySkybox()">Test Galaxy Skybox</button>
+      <button onclick="testNebulaSkybox()">Test Nebula Skybox</button>
+      <button onclick="testSunsetSkybox()">Test Sunset Skybox</button>
+      <button onclick="testUnderwaterSkybox()">Test Underwater Skybox</button>
+      <button onclick="testVoidSkybox()">Test Void Skybox</button>
+      <button onclick="testLighting()">Test Lighting</button>
+      <button onclick="testFog()">Test Fog</button>
+      <button onclick="testPresetMapping()">Test Preset Mapping</button>
+
+      <h2>Test Results</h2>
+      <div id="testResults"></div>
+    </div>
+
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r160/three.min.js"></script>
+
+    <!-- Engine modules -->
+    <script src="puppeteer/engine/MaterialSystem.js"></script>
+    <script src="puppeteer/engine/SceneRenderer.js"></script>
+
+    <script>
+      let renderer = null;
+      const testResults = [];
+
+      function logTest(name, passed, message) {
+        const result = { name, passed, message };
+        testResults.push(result);
+
+        const resultsDiv = document.getElementById('testResults');
+        const resultDiv = document.createElement('div');
+        resultDiv.className = `test-result ${passed ? 'pass' : 'fail'}`;
+        resultDiv.textContent = `${passed ? '✓' : '✗'} ${name}: ${message}`;
+        resultsDiv.appendChild(resultDiv);
+
+        console.log(`${passed ? 'PASS' : 'FAIL'}: ${name} - ${message}`);
+      }
+
+      function initRenderer() {
+        const canvas = document.getElementById('renderCanvas');
+        if (renderer) {
+          renderer.dispose();
+        }
+        renderer = new SceneRenderer(canvas, { quality: 'medium' });
+        return renderer;
+      }
+
+      function testGalaxySkybox() {
+        try {
+          const r = initRenderer();
+          const dreamData = {
+            environment: {
+              skybox: 'galaxy',
+            },
+          };
+          r.initWithDream(dreamData, 800, 600);
+
+          const skybox = r.scene.children.find((obj) => obj.name === 'skybox');
+          const passed = skybox && skybox.material.type === 'ShaderMaterial';
+          logTest(
+            'Galaxy Skybox',
+            passed,
+            passed
+              ? 'Galaxy skybox created successfully'
+              : 'Failed to create galaxy skybox'
+          );
+
+          if (passed) {
+            r.seek(0);
+          }
+        } catch (error) {
+          logTest('Galaxy Skybox', false, `Error: ${error.message}`);
+        }
+      }
+
+      function testNebulaSkybox() {
+        try {
+          const r = initRenderer();
+          const dreamData = {
+            environment: {
+              skybox: 'nebula',
+            },
+          };
+          r.initWithDream(dreamData, 800, 600);
+
+          const skybox = r.scene.children.find((obj) => obj.name === 'skybox');
+          const passed = skybox && skybox.material.type === 'ShaderMaterial';
+          logTest(
+            'Nebula Skybox',
+            passed,
+            passed
+              ? 'Nebula skybox created successfully'
+              : 'Failed to create nebula skybox'
+          );
+
+          if (passed) {
+            r.seek(0);
+          }
+        } catch (error) {
+          logTest('Nebula Skybox', false, `Error: ${error.message}`);
+        }
+      }
+
+      function testSunsetSkybox() {
+        try {
+          const r = initRenderer();
+          const dreamData = {
+            environment: {
+              skybox: 'sunset',
+            },
+          };
+          r.initWithDream(dreamData, 800, 600);
+
+          const skybox = r.scene.children.find((obj) => obj.name === 'skybox');
+          const passed = skybox && skybox.material.type === 'ShaderMaterial';
+          logTest(
+            'Sunset Skybox',
+            passed,
+            passed
+              ? 'Sunset skybox created successfully'
+              : 'Failed to create sunset skybox'
+          );
+
+          if (passed) {
+            r.seek(0);
+          }
+        } catch (error) {
+          logTest('Sunset Skybox', false, `Error: ${error.message}`);
+        }
+      }
+
+      function testUnderwaterSkybox() {
+        try {
+          const r = initRenderer();
+          const dreamData = {
+            environment: {
+              skybox: 'underwater',
+            },
+          };
+          r.initWithDream(dreamData, 800, 600);
+
+          const skybox = r.scene.children.find((obj) => obj.name === 'skybox');
+          const passed = skybox && skybox.material.type === 'ShaderMaterial';
+          logTest(
+            'Underwater Skybox',
+            passed,
+            passed
+              ? 'Underwater skybox created successfully'
+              : 'Failed to create underwater skybox'
+          );
+
+          if (passed) {
+            r.seek(0);
+          }
+        } catch (error) {
+          logTest('Underwater Skybox', false, `Error: ${error.message}`);
+        }
+      }
+
+      function testVoidSkybox() {
+        try {
+          const r = initRenderer();
+          const dreamData = {
+            environment: {
+              skybox: 'void',
+            },
+          };
+          r.initWithDream(dreamData, 800, 600);
+
+          const skybox = r.scene.children.find((obj) => obj.name === 'skybox');
+          const passed = skybox && skybox.material.type === 'ShaderMaterial';
+          logTest(
+            'Void Skybox',
+            passed,
+            passed
+              ? 'Void skybox created successfully'
+              : 'Failed to create void skybox'
+          );
+
+          if (passed) {
+            r.seek(0);
+          }
+        } catch (error) {
+          logTest('Void Skybox', false, `Error: ${error.message}`);
+        }
+      }
+
+      function testLighting() {
+        try {
+          const r = initRenderer();
+          const dreamData = {
+            environment: {
+              lighting: {
+                ambient: 0.6,
+                directional: {
+                  intensity: 1.2,
+                  position: [50, 100, 25],
+                  color: '#ffeecc',
+                },
+              },
+            },
+          };
+          r.initWithDream(dreamData, 800, 600);
+
+          const ambientLight = r.scene.children.find(
+            (obj) => obj.name === 'ambientLight'
+          );
+          const directionalLight = r.scene.children.find(
+            (obj) => obj.name === 'directionalLight'
+          );
+
+          const passed =
+            ambientLight &&
+            directionalLight &&
+            Math.abs(ambientLight.intensity - 0.6) < 0.01 &&
+            Math.abs(directionalLight.intensity - 1.2) < 0.01;
+
+          logTest(
+            'Lighting System',
+            passed,
+            passed
+              ? 'Ambient and directional lights created with correct settings'
+              : 'Failed to create lights correctly'
+          );
+
+          if (passed) {
+            r.seek(0);
+          }
+        } catch (error) {
+          logTest('Lighting System', false, `Error: ${error.message}`);
+        }
+      }
+
+      function testFog() {
+        try {
+          const r = initRenderer();
+          const dreamData = {
+            environment: {
+              fog: 0.7,
+              skyColor: '#334455',
+            },
+          };
+          r.initWithDream(dreamData, 800, 600);
+
+          const passed =
+            r.scene.fog !== null &&
+            r.scene.fog.near > 0 &&
+            r.scene.fog.far > r.scene.fog.near;
+          logTest(
+            'Fog System',
+            passed,
+            passed
+              ? `Fog created with near=${r.scene.fog.near.toFixed(
+                  1
+                )}, far=${r.scene.fog.far.toFixed(1)}`
+              : 'Failed to create fog'
+          );
+
+          if (passed) {
+            r.seek(0);
+          }
+        } catch (error) {
+          logTest('Fog System', false, `Error: ${error.message}`);
+        }
+      }
+
+      function testPresetMapping() {
+        try {
+          const presets = [
+            'space',
+            'underwater',
+            'forest',
+            'desert',
+            'dusk',
+            'night',
+          ];
+          let allPassed = true;
+
+          for (const preset of presets) {
+            const r = initRenderer();
+            const dreamData = {
+              environment: {
+                preset: preset,
+              },
+            };
+            r.initWithDream(dreamData, 800, 600);
+
+            const skybox = r.scene.children.find(
+              (obj) => obj.name === 'skybox'
+            );
+            if (!skybox) {
+              allPassed = false;
+              break;
+            }
+          }
+
+          logTest(
+            'Preset Mapping',
+            allPassed,
+            allPassed
+              ? 'All environment presets mapped to skyboxes correctly'
+              : 'Some presets failed to map'
+          );
+
+          if (allPassed) {
+            renderer.seek(0);
+          }
+        } catch (error) {
+          logTest('Preset Mapping', false, `Error: ${error.message}`);
+        }
+      }
+
+      // Run initial test on load
+      window.addEventListener('load', () => {
+        console.log('Environment System Test Page Loaded');
+        console.log('Click buttons to run individual tests');
+      });
+    </script>
+  </body>
+</html>

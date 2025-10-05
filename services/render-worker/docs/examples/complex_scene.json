@@ -1,0 +1,257 @@
+{
+  "title": "Complex Underwater City",
+  "renderMode": "3d",
+  "style": "fantasy",
+  "quality": "high",
+
+  "environment": {
+    "preset": "underwater",
+    "skybox": "underwater",
+    "lighting": {
+      "ambient": 0.4,
+      "directional": {
+        "intensity": 0.6,
+        "position": [50, 100, 50],
+        "color": "#88ccff"
+      }
+    },
+    "fog": 0.5,
+    "skyColor": "#001133"
+  },
+
+  "structures": [
+    {
+      "id": "tower1",
+      "type": "tower",
+      "pos": [-30, -10, 0],
+      "scale": 15,
+      "material": {
+        "color": "#4488aa",
+        "metalness": 0.6,
+        "roughness": 0.3
+      },
+      "features": ["glowing_edges"]
+    },
+    {
+      "id": "tower2",
+      "type": "tower",
+      "pos": [30, -10, 0],
+      "scale": 18,
+      "material": {
+        "color": "#5599bb",
+        "metalness": 0.6,
+        "roughness": 0.3
+      },
+      "features": ["glowing_edges"]
+    },
+    {
+      "id": "tower3",
+      "type": "tower",
+      "pos": [0, -10, -30],
+      "scale": 20,
+      "material": {
+        "color": "#66aacc",
+        "metalness": 0.6,
+        "roughness": 0.3
+      },
+      "features": ["glowing_edges", "emissive"]
+    },
+    {
+      "id": "bridge1",
+      "type": "bridge",
+      "pos": [0, 5, 0],
+      "scale": 25,
+      "rotation": [0, 1.57, 0],
+      "material": {
+        "color": "#888888",
+        "metalness": 0.8
+      }
+    },
+    {
+      "id": "crystal1",
+      "type": "crystal",
+      "pos": [-15, 10, 15],
+      "scale": 6,
+      "material": {
+        "color": "#88ffff",
+        "opacity": 0.7,
+        "metalness": 0.9
+      },
+      "animation": {
+        "type": "rotate",
+        "speed": 0.5,
+        "axis": "y"
+      },
+      "features": ["glowing_edges"]
+    },
+    {
+      "id": "crystal2",
+      "type": "crystal",
+      "pos": [15, 12, 15],
+      "scale": 5,
+      "material": {
+        "color": "#ff88ff",
+        "opacity": 0.7,
+        "metalness": 0.9
+      },
+      "animation": {
+        "type": "rotate",
+        "speed": 0.7,
+        "axis": "y"
+      },
+      "features": ["glowing_edges"]
+    },
+    {
+      "id": "crystal3",
+      "type": "crystal",
+      "pos": [0, 15, 20],
+      "scale": 7,
+      "material": {
+        "color": "#ffff88",
+        "opacity": 0.7,
+        "metalness": 0.9
+      },
+      "animation": {
+        "type": "pulse",
+        "speed": 1.0,
+        "amplitude": 0.2
+      },
+      "features": ["glowing_edges", "emissive"]
+    },
+    {
+      "id": "fish1",
+      "type": "fish",
+      "pos": [20, 5, 10],
+      "scale": 3,
+      "material": {
+        "color": "#ff8844"
+      },
+      "animation": {
+        "type": "orbit",
+        "speed": 0.8,
+        "amplitude": 25
+      }
+    },
+    {
+      "id": "fish2",
+      "type": "fish",
+      "pos": [-20, 8, 10],
+      "scale": 2.5,
+      "material": {
+        "color": "#ffaa44"
+      },
+      "animation": {
+        "type": "orbit",
+        "speed": 1.0,
+        "amplitude": 20
+      }
+    },
+    {
+      "id": "fish3",
+      "type": "fish",
+      "pos": [0, 3, 25],
+      "scale": 4,
+      "material": {
+        "color": "#ff6644"
+      },
+      "animation": {
+        "type": "orbit",
+        "speed": 0.6,
+        "amplitude": 30
+      }
+    },
+    {
+      "id": "water_surface",
+      "type": "water",
+      "pos": [0, 25, 0],
+      "scale": 80,
+      "material": {
+        "color": "#0088ff",
+        "opacity": 0.6
+      }
+    }
+  ],
+
+  "entities": [
+    {
+      "id": "bubbles",
+      "type": "floating_orbs",
+      "count": 200,
+      "params": {
+        "size": 0.5,
+        "color": "#ffffff",
+        "glow": 0.3,
+        "speed": 0.5
+      }
+    },
+    {
+      "id": "light_particles",
+      "type": "particle_stream",
+      "count": 500,
+      "params": {
+        "speed": 1.0,
+        "color": "#88ffff",
+        "glow": 0.6
+      }
+    },
+    {
+      "id": "magic_butterflies",
+      "type": "light_butterflies",
+      "count": 50,
+      "params": {
+        "speed": 1.5,
+        "color": "#ff88ff",
+        "behavior": "swarm"
+      }
+    }
+  ],
+
+  "cinematography": {
+    "durationSec": 30,
+    "shots": [
+      {
+        "type": "establish",
+        "startTime": 0,
+        "duration": 5,
+        "position": [0, 50, 100],
+        "target": [0, 0, 0]
+      },
+      {
+        "type": "flythrough",
+        "startTime": 5,
+        "duration": 8,
+        "path": [
+          [80, 30, 80],
+          [40, 15, 20],
+          [0, 10, -20],
+          [-40, 15, 20],
+          [-80, 30, 80]
+        ],
+        "speed": 1.0
+      },
+      {
+        "type": "close_up",
+        "startTime": 13,
+        "duration": 5,
+        "target": "crystal3",
+        "distance": 15
+      },
+      {
+        "type": "orbital",
+        "startTime": 18,
+        "duration": 8,
+        "target": "tower3",
+        "distance": 50,
+        "speed": 0.5
+      },
+      {
+        "type": "pull_back",
+        "startTime": 26,
+        "duration": 4,
+        "target": [0, 0, 0],
+        "startDistance": 30,
+        "endDistance": 120
+      }
+    ]
+  }
+}

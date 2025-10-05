@@ -1,0 +1,292 @@
+{
+  "title": "Structure Type Showcase",
+  "renderMode": "3d",
+  "style": "surreal",
+  "quality": "medium",
+
+  "environment": {
+    "preset": "void",
+    "skybox": "void",
+    "lighting": {
+      "ambient": 0.5,
+      "directional": {
+        "intensity": 1.0,
+        "position": [100, 100, 100],
+        "color": "#ffffff"
+      }
+    }
+  },
+
+  "structures": [
+    {
+      "id": "star",
+      "type": "star",
+      "pos": [0, 40, 0],
+      "scale": 5,
+      "material": {
+        "color": "#ffff00",
+        "emissiveIntensity": 1.5
+      },
+      "features": ["emissive"]
+    },
+    {
+      "id": "planet",
+      "type": "planet",
+      "pos": [20, 35, 0],
+      "scale": 4,
+      "material": {
+        "color": "#4488ff"
+      },
+      "animation": {
+        "type": "rotate",
+        "speed": 0.5,
+        "axis": "y"
+      }
+    },
+    {
+      "id": "galaxy",
+      "type": "galaxy",
+      "pos": [-30, 35, 0],
+      "scale": 8,
+      "material": {
+        "color": "#8844ff"
+      }
+    },
+    {
+      "id": "nebula",
+      "type": "nebula",
+      "pos": [0, 35, 25],
+      "scale": 10,
+      "material": {
+        "color": "#ff44ff",
+        "opacity": 0.6
+      }
+    },
+    {
+      "id": "water",
+      "type": "water",
+      "pos": [0, 0, 0],
+      "scale": 50,
+      "material": {
+        "color": "#0088ff",
+        "opacity": 0.7
+      }
+    },
+    {
+      "id": "mountain1",
+      "type": "mountain",
+      "pos": [-35, 0, -20],
+      "scale": 15,
+      "material": {
+        "color": "#886644"
+      }
+    },
+    {
+      "id": "mountain2",
+      "type": "mountain",
+      "pos": [35, 0, -20],
+      "scale": 18,
+      "material": {
+        "color": "#997755"
+      }
+    },
+    {
+      "id": "fire",
+      "type": "fire",
+      "pos": [0, 5, -30],
+      "scale": 4,
+      "material": {
+        "color": "#ff4400"
+      }
+    },
+    {
+      "id": "cloud1",
+      "type": "cloud",
+      "pos": [-20, 25, 10],
+      "scale": 8,
+      "material": {
+        "color": "#ffffff",
+        "opacity": 0.8
+      },
+      "animation": {
+        "type": "float",
+        "speed": 0.5,
+        "amplitude": 3
+      }
+    },
+    {
+      "id": "cloud2",
+      "type": "cloud",
+      "pos": [20, 28, 10],
+      "scale": 10,
+      "material": {
+        "color": "#ffffff",
+        "opacity": 0.8
+      },
+      "animation": {
+        "type": "float",
+        "speed": 0.6,
+        "amplitude": 4
+      }
+    },
+    {
+      "id": "horse",
+      "type": "horse",
+      "pos": [-15, 5, 15],
+      "scale": 5,
+      "material": {
+        "color": "#8B4513"
+      },
+      "animation": {
+        "type": "rotate",
+        "speed": 0.3,
+        "axis": "y"
+      }
+    },
+    {
+      "id": "bird",
+      "type": "bird",
+      "pos": [10, 20, 20],
+      "scale": 2,
+      "material": {
+        "color": "#4488ff"
+      },
+      "animation": {
+        "type": "orbit",
+        "speed": 1.0,
+        "amplitude": 15
+      }
+    },
+    {
+      "id": "fish",
+      "type": "fish",
+      "pos": [5, 3, 5],
+      "scale": 3,
+      "material": {
+        "color": "#ff8844"
+      },
+      "animation": {
+        "type": "float",
+        "speed": 1.0,
+        "amplitude": 2
+      }
+    },
+    {
+      "id": "human",
+      "type": "human",
+      "pos": [15, 5, 15],
+      "scale": 6,
+      "material": {
+        "color": "#ffccaa"
+      }
+    },
+    {
+      "id": "tower",
+      "type": "tower",
+      "pos": [-25, 0, 0],
+      "scale": 12,
+      "material": {
+        "color": "#888888",
+        "metalness": 0.8
+      },
+      "features": ["glowing_edges"]
+    },
+    {
+      "id": "bridge",
+      "type": "bridge",
+      "pos": [0, 8, -10],
+      "scale": 20,
+      "material": {
+        "color": "#666666"
+      }
+    },
+    {
+      "id": "crystal1",
+      "type": "crystal",
+      "pos": [25, 10, 0],
+      "scale": 8,
+      "material": {
+        "color": "#88ffff",
+        "opacity": 0.7,
+        "metalness": 0.9
+      },
+      "animation": {
+        "type": "rotate",
+        "speed": 0.5,
+        "axis": "y"
+      },
+      "features": ["glowing_edges"]
+    },
+    {
+      "id": "crystal2",
+      "type": "crystal",
+      "pos": [30, 8, 10],
+      "scale": 6,
+      "material": {
+        "color": "#ff88ff",
+        "opacity": 0.7,
+        "metalness": 0.9
+      },
+      "animation": {
+        "type": "pulse",
+        "speed": 1.0,
+        "amplitude": 0.3
+      },
+      "features": ["glowing_edges", "emissive"]
+    }
+  ],
+
+  "entities": [
+    {
+      "id": "particles",
+      "type": "particle_stream",
+      "count": 1000,
+      "params": {
+        "speed": 2.0,
+        "color": "#ffffff",
+        "glow": 0.5
+      }
+    },
+    {
+      "id": "orbs",
+      "type": "floating_orbs",
+      "count": 100,
+      "params": {
+        "size": 1.5,
+        "color": "#ffff00",
+        "glow": 0.8
+      }
+    },
+    {
+      "id": "butterflies",
+      "type": "light_butterflies",
+      "count": 80,
+      "params": {
+        "speed": 1.5,
+        "color": "#ff88ff",
+        "behavior": "swarm"
+      }
+    }
+  ],
+
+  "cinematography": {
+    "durationSec": 40,
+    "shots": [
+      {
+        "type": "establish",
+        "startTime": 0,
+        "duration": 5,
+        "position": [0, 60, 120],
+        "target": [0, 10, 0]
+      },
+      {
+        "type": "orbital",
+        "startTime": 5,
+        "duration": 35,
+        "target": [0, 10, 0],
+        "distance": 80,
+        "speed": 0.3
+      }
+    ]
+  }
+}

@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CameraController Test</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #1a1a1a;
+        color: #fff;
+      }
+      #container {
+        display: flex;
+        height: 100vh;
+      }
+      #canvas-container {
+        flex: 1;
+        position: relative;
+      }
+      #renderCanvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      #controls {
+        width: 300px;
+        padding: 20px;
+        background: #2a2a2a;
+        overflow-y: auto;
+      }
+      h2 {
+        margin-top: 0;
+        color: #4caf50;
+      }
+      .control-group {
+        margin-bottom: 20px;
+      }
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-size: 14px;
+      }
+      button {
+        width: 100%;
+        padding: 10px;
+        margin-bottom: 10px;
+        background: #4caf50;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      button:hover {
+        background: #45a049;
+      }
+      input[type='range'] {
+        width: 100%;
+      }
+      .info {
+        font-size: 12px;
+        color: #888;
+        margin-top: 5px;
+      }
+      #status {
+        padding: 10px;
+        background: #333;
+        border-radius: 4px;
+        font-size: 12px;
+        margin-bottom: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="container">
+      <div id="canvas-container">
+        <canvas id="renderCanvas"></canvas>
+      </div>
+      <div id="controls">
+        <h2>CameraController Test</h2>
+
+        <div id="status">
+          <div>Time: <span id="time">0.00</span>s</div>
+          <div>Shot: <span id="current-shot">None</span></div>
+          <div>Camera: <span id="camera-pos">0, 0, 0</span></div>
+        </div>
+
+        <div class="control-group">
+          <label>Time Control</label>
+          <input
+            type="range"
+            id="timeSlider"
+            min="0"
+            max="30"
+            step="0.1"
+            value="0"
+          />
+          <div class="info">Drag to seek through time</div>
+        </div>
+
+        <div class="control-group">
+          <button onclick="testOrbitalShot()">Test Orbital Shot</button>
+          <button onclick="testFlythroughShot()">Test Flythrough Shot</button>
+          <button onclick="testEstablishShot()">Test Establish Shot</button>
+          <button onclick="testCloseUpShot()">Test Close-up Shot</button>
+          <button onclick="testPullBackShot()">Test Pull-back Shot</button>
+          <button onclick="testMultipleShots()">Test Multiple Shots</button>
+          <button onclick="testDefaultOrbital()">Test Default Orbital</button>
+        </div>
+
+        <div class="control-group">
+          <button onclick="toggleAnimation()">Toggle Animation</button>
+          <div class="info">Start/stop automatic playback</div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r160/three.min.js"></script>
+    <script src="CameraController.js"></script>
+
+    <script>
+      let scene, camera, renderer, cameraController;
+      let isAnimating = false;
+      let animationId = null;
+
+      // Initialize Three.js scene
+      function init() {
+        const canvas = document.getElementById('renderCanvas');
+
+        // Create scene
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+
+        // Create camera
+        camera = new THREE.PerspectiveCamera(
+          75,
+          canvas.clientWidth / canvas.clientHeight,
+          0.1,
+          10000
+        );
+        camera.position.set(0, 50, 100);
+
+        // Create renderer
+        renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+        renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+
+        // Create camera controller
+        cameraController = new CameraController(camera, scene);
+
+        // Add some test objects to the scene
+        createTestScene();
+
+        // Add lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(100, 100, 50);
+        scene.add(directionalLight);
+
+        // Set up time slider
+        const timeSlider = document.getElementById('timeSlider');
+        timeSlider.addEventListener('input', (e) => {
+          const time = parseFloat(e.target.value);
+          updateScene(time);
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', onWindowResize);
+
+        // Initial render
+        updateScene(0);
+
+        console.log('CameraController test initialized');
+      }
+
+      function createTestScene() {
+        // Create a grid of cubes
+        const geometry = new THREE.BoxGeometry(10, 10, 10);
+
+        for (let x = -50; x <= 50; x += 25) {
+          for (let z = -50; z <= 50; z += 25) {
+            const material = new THREE.MeshPhongMaterial({
+              color: new THREE.Color().setHSL(Math.random(), 0.7, 0.5),
+            });
+            const cube = new THREE.Mesh(geometry, material);
+            cube.position.set(x, 5, z);
+            cube.name = `cube_${x}_${z}`;
+            scene.add(cube);
+          }
+        }
+
+        // Create a central target sphere
+        const sphereGeometry = new THREE.SphereGeometry(5, 32, 32);
+        const sphereMaterial = new THREE.MeshPhongMaterial({
+          color: 0xff0000,
+          emissive: 0xff0000,
+          emissiveIntensity: 0.5,
+        });
+        const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+        sphere.position.set(0, 10, 0);
+        sphere.name = 'target';
+        scene.add(sphere);
+
+        // Add a ground plane
+        const planeGeometry = new THREE.PlaneGeometry(200, 200);
+        const planeMaterial = new THREE.MeshPhongMaterial({
+          color: 0x333333,
+          side: THREE.DoubleSide,
+        });
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -Math.PI / 2;
+        plane.position.y = 0;
+        scene.add(plane);
+      }
+
+      function updateScene(time) {
+        // Update camera controller
+        if (cameraController) {
+          cameraController.update(time);
+        }
+
+        // Render
+        renderer.render(scene, camera);
+
+        // Update UI
+        document.getElementById('time').textContent = time.toFixed(2);
+        document.getElementById(
+          'camera-pos'
+        ).textContent = `${camera.position.x.toFixed(
+          1
+        )}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}`;
+
+        // Update current shot info
+        const currentShot = cameraController._getCurrentShot(time);
+        document.getElementById('current-shot').textContent = currentShot
+          ? currentShot.type
+          : 'Default Orbital';
+      }
+
+      function onWindowResize() {
+        const canvas = document.getElementById('renderCanvas');
+        camera.aspect = canvas.clientWidth / canvas.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+        updateScene(parseFloat(document.getElementById('timeSlider').value));
+      }
+
+      function testOrbitalShot() {
+        const shots = [
+          {
+            type: 'orbital',
+            startTime: 0,
+            duration: 30,
+            target: [0, 10, 0],
+            distance: 80,
+            speed: 1.0,
+          },
+        ];
+        cameraController.setupShots(shots);
+        document.getElementById('timeSlider').value = 0;
+        updateScene(0);
+        console.log('Testing orbital shot');
+      }
+
+      function testFlythroughShot() {
+        const shots = [
+          {
+            type: 'flythrough',
+            startTime: 0,
+            duration: 30,
+            target: [0, 10, 0],
+            path: [
+              { x: -100, y: 50, z: -100 },
+              { x: -50, y: 30, z: 0 },
+              { x: 0, y: 20, z: 50 },
+              { x: 50, y: 30, z: 0 },
+              { x: 100, y: 50, z: -100 },
+            ],
+          },
+        ];
+        cameraController.setupShots(shots);
+        document.getElementById('timeSlider').value = 0;
+        updateScene(0);
+        console.log('Testing flythrough shot');
+      }
+
+      function testEstablishShot() {
+        const shots = [
+          {
+            type: 'establish',
+            startTime: 0,
+            duration: 30,
+            target: [0, 10, 0],
+            distance: 150,
+            angle: 0.785,
+          },
+        ];
+        cameraController.setupShots(shots);
+        document.getElementById('timeSlider').value = 0;
+        updateScene(0);
+        console.log('Testing establish shot');
+      }
+
+      function testCloseUpShot() {
+        const shots = [
+          {
+            type: 'close_up',
+            startTime: 0,
+            duration: 30,
+            target: [0, 10, 0],
+            distance: 20,
+            heightOffset: 5,
+          },
+        ];
+        cameraController.setupShots(shots);
+        document.getElementById('timeSlider').value = 0;
+        updateScene(0);
+        console.log('Testing close-up shot');
+      }
+
+      function testPullBackShot() {
+        const shots = [
+          {
+            type: 'pull_back',
+            startTime: 0,
+            duration: 30,
+            target: [0, 10, 0],
+            startDistance: 15,
+            endDistance: 120,
+          },
+        ];
+        cameraController.setupShots(shots);
+        document.getElementById('timeSlider').value = 0;
+        updateScene(0);
+        console.log('Testing pull-back shot');
+      }
+
+      function testMultipleShots() {
+        const shots = [
+          {
+            type: 'establish',
+            startTime: 0,
+            duration: 5,
+            target: [0, 10, 0],
+            distance: 150,
+          },
+          {
+            type: 'orbital',
+            startTime: 5,
+            duration: 10,
+            target: [0, 10, 0],
+            distance: 60,
+            speed: 1.5,
+          },
+          {
+            type: 'close_up',
+            startTime: 15,
+            duration: 5,
+            target: [0, 10, 0],
+            distance: 20,
+          },
+          {
+            type: 'pull_back',
+            startTime: 20,
+            duration: 10,
+            target: [0, 10, 0],
+            startDistance: 20,
+            endDistance: 100,
+          },
+        ];
+        cameraController.setupShots(shots);
+        document.getElementById('timeSlider').value = 0;
+        updateScene(0);
+        console.log('Testing multiple shots sequence');
+      }
+
+      function testDefaultOrbital() {
+        cameraController.setupShots([]);
+        document.getElementById('timeSlider').value = 0;
+        updateScene(0);
+        console.log('Testing default orbital view');
+      }
+
+      function toggleAnimation() {
+        if (isAnimating) {
+          stopAnimation();
+        } else {
+          startAnimation();
+        }
+      }
+
+      function startAnimation() {
+        isAnimating = true;
+        const timeSlider = document.getElementById('timeSlider');
+
+        function animate() {
+          if (!isAnimating) return;
+
+          let time = parseFloat(timeSlider.value);
+          time += 0.016; // ~60fps
+
+          if (time > 30) {
+            time = 0;
+          }
+
+          timeSlider.value = time;
+          updateScene(time);
+
+          animationId = requestAnimationFrame(animate);
+        }
+
+        animate();
+        console.log('Animation started');
+      }
+
+      function stopAnimation() {
+        isAnimating = false;
+        if (animationId) {
+          cancelAnimationFrame(animationId);
+          animationId = null;
+        }
+        console.log('Animation stopped');
+      }
+
+      // Initialize on load
+      window.addEventListener('load', init);
+    </script>
+  </body>
+</html>

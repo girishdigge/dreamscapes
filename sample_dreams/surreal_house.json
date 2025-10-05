@@ -1,5 +1,116 @@
 {
-  "text": "A house that grows like a tree with rooms as leaves, floating in cotton candy clouds while impossible staircases spiral into infinity",
+  "id": "550e8400-e29b-41d4-a716-446655440001",
+  "title": "A house that grows like a tree with rooms as leaves",
   "style": "surreal",
-  "expectedDuration": 35
+  "created": "2025-01-15T10:30:00.000Z",
+  "source": "mcp-gateway",
+  "environment": {
+    "preset": "dusk",
+    "fog": 0.4,
+    "skyColor": "#FFB6C1",
+    "ambientLight": 0.6
+  },
+  "structures": [
+    {
+      "id": "house_trunk",
+      "type": "twisted_house",
+      "pos": [0, 0, 0],
+      "scale": 3.0,
+      "rotation": [0, 0.3, 0],
+      "features": ["animated_textures", "glowing_edges"]
+    },
+    {
+      "id": "room_leaf_1",
+      "type": "floating_platform",
+      "pos": [15, 20, 5],
+      "scale": 2.0,
+      "rotation": [0.2, 0, 0.1],
+      "features": ["transparent", "pulsating"]
+    },
+    {
+      "id": "room_leaf_2",
+      "type": "floating_platform",
+      "pos": [-12, 18, -8],
+      "scale": 1.8,
+      "rotation": [-0.1, 0.5, 0.2],
+      "features": ["glowing_edges"]
+    },
+    {
+      "id": "staircase_1",
+      "type": "infinite_staircase",
+      "pos": [8, 5, 0],
+      "scale": 1.5,
+      "rotation": [0, 1.57, 0],
+      "features": ["rotating"]
+    },
+    {
+      "id": "cloud_platform_1",
+      "type": "floating_island",
+      "pos": [0, -5, 0],
+      "scale": 5.0,
+      "features": ["particle_effects"]
+    }
+  ],
+  "entities": [
+    {
+      "id": "cotton_candy_particles",
+      "type": "particle_swarm",
+      "count": 80,
+      "params": {
+        "speed": 0.5,
+        "glow": 0.7,
+        "size": 2.0,
+        "color": "#FFB6D9"
+      }
+    },
+    {
+      "id": "floating_memories",
+      "type": "memory_fragments",
+      "count": 30,
+      "params": {
+        "speed": 0.3,
+        "glow": 0.5,
+        "size": 1.0,
+        "color": "#FFFFFF"
+      }
+    }
+  ],
+  "cinematography": {
+    "durationSec": 35,
+    "shots": [
+      {
+        "type": "establish",
+        "duration": 8,
+        "startPos": [50, 30, 50],
+        "endPos": [50, 30, 50]
+      },
+      {
+        "type": "orbit",
+        "target": "house_trunk",
+        "duration": 12
+      },
+      {
+        "type": "flythrough",
+        "duration": 10,
+        "startPos": [30, 15, 30],
+        "endPos": [-30, 25, -20]
+      },
+      {
+        "type": "pull_back",
+        "duration": 5,
+        "startPos": [10, 10, 10],
+        "endPos": [60, 40, 60]
+      }
+    ]
+  },
+  "render": {
+    "res": [1920, 1080],
+    "fps": 30,
+    "quality": "medium"
+  },
+  "metadata": {
+    "originalText": "A house that grows like a tree with rooms as leaves, floating in cotton candy clouds while impossible staircases spiral into infinity",
+    "requestedStyle": "surreal",
+    "version": "1.0.0"
+  }
 }

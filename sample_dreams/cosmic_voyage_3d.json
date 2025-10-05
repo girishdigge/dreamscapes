@@ -1,0 +1,190 @@
+{
+  "id": "550e8400-e29b-41d4-a716-446655440004",
+  "title": "Cosmic voyage through a galaxy of crystalline planets",
+  "style": "fantasy",
+  "renderMode": "3d",
+  "created": "2025-01-15T12:00:00.000Z",
+  "source": "mcp-gateway",
+  "environment": {
+    "preset": "space",
+    "skybox": "galaxy",
+    "fog": 0.2,
+    "skyColor": "#000033",
+    "ambientLight": 0.3,
+    "lighting": {
+      "ambient": 0.3,
+      "directional": {
+        "intensity": 0.8,
+        "position": [100, 100, 50],
+        "color": "#FFFFFF"
+      }
+    }
+  },
+  "structures": [
+    {
+      "id": "central_star",
+      "type": "star",
+      "pos": [0, 0, 0],
+      "scale": 8.0,
+      "features": ["emissive"],
+      "material": {
+        "color": "#FFFF00",
+        "emissiveIntensity": 1.5
+      }
+    },
+    {
+      "id": "planet_1",
+      "type": "planet",
+      "pos": [40, 5, 0],
+      "scale": 4.0,
+      "features": ["rotating"],
+      "material": {
+        "color": "#4488FF",
+        "metalness": 0.3,
+        "roughness": 0.7
+      },
+      "animation": {
+        "type": "orbit",
+        "speed": 0.3,
+        "amplitude": 40
+      }
+    },
+    {
+      "id": "planet_2",
+      "type": "planet",
+      "pos": [-50, -8, 20],
+      "scale": 3.5,
+      "features": ["rotating"],
+      "material": {
+        "color": "#FF6644",
+        "metalness": 0.2,
+        "roughness": 0.8
+      },
+      "animation": {
+        "type": "orbit",
+        "speed": 0.2,
+        "amplitude": 55
+      }
+    },
+    {
+      "id": "crystal_1",
+      "type": "crystal",
+      "pos": [25, 15, -30],
+      "scale": 3.0,
+      "rotation": [0.5, 0.8, 0.3],
+      "features": ["glowing_edges", "transparent"],
+      "material": {
+        "color": "#FF00FF",
+        "opacity": 0.7,
+        "transmission": 0.9
+      },
+      "animation": {
+        "type": "rotate",
+        "speed": 1.0
+      }
+    },
+    {
+      "id": "crystal_2",
+      "type": "crystal",
+      "pos": [-35, 20, 25],
+      "scale": 2.5,
+      "rotation": [0.3, 1.2, 0.6],
+      "features": ["glowing_edges", "transparent"],
+      "material": {
+        "color": "#00FFFF",
+        "opacity": 0.8,
+        "transmission": 0.85
+      },
+      "animation": {
+        "type": "rotate",
+        "speed": 0.8
+      }
+    },
+    {
+      "id": "galaxy_spiral",
+      "type": "galaxy",
+      "pos": [0, -100, -200],
+      "scale": 10.0,
+      "features": ["emissive", "rotating"]
+    }
+  ],
+  "entities": [
+    {
+      "id": "cosmic_dust",
+      "type": "particle_stream",
+      "count": 100,
+      "params": {
+        "speed": 1.0,
+        "glow": 0.6,
+        "size": 0.5,
+        "color": "#FFFFFF",
+        "behavior": "flow"
+      }
+    },
+    {
+      "id": "energy_orbs",
+      "type": "floating_orbs",
+      "count": 30,
+      "params": {
+        "speed": 0.8,
+        "glow": 0.9,
+        "size": 1.2,
+        "color": "#FFD700"
+      }
+    },
+    {
+      "id": "light_trails",
+      "type": "light_butterflies",
+      "count": 50,
+      "params": {
+        "speed": 2.0,
+        "glow": 0.7,
+        "size": 0.8,
+        "color": "#00FFFF"
+      }
+    }
+  ],
+  "cinematography": {
+    "durationSec": 45,
+    "shots": [
+      {
+        "type": "establish",
+        "duration": 8,
+        "startPos": [100, 80, 100],
+        "endPos": [100, 80, 100]
+      },
+      {
+        "type": "orbit",
+        "target": "central_star",
+        "duration": 15
+      },
+      {
+        "type": "flythrough",
+        "duration": 12,
+        "startPos": [60, 30, 60],
+        "endPos": [-60, 40, -60]
+      },
+      {
+        "type": "close_up",
+        "target": "crystal_1",
+        "duration": 6
+      },
+      {
+        "type": "pull_back",
+        "duration": 4,
+        "startPos": [20, 20, 20],
+        "endPos": [120, 100, 120]
+      }
+    ]
+  },
+  "render": {
+    "res": [1920, 1080],
+    "fps": 30,
+    "quality": "high"
+  },
+  "metadata": {
+    "originalText": "Cosmic voyage through a galaxy of crystalline planets orbiting a golden star, with streams of cosmic dust and energy flowing between worlds",
+    "requestedStyle": "fantasy",
+    "version": "1.0.0"
+  }
+}

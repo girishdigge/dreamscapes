@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>3D Template Manual Test</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+        background: #f0f0f0;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .controls {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      button {
+        background: #4caf50;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        margin: 5px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      button:hover {
+        background: #45a049;
+      }
+      button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      .status {
+        margin-top: 10px;
+        padding: 10px;
+        background: #e8f5e9;
+        border-left: 4px solid #4caf50;
+        border-radius: 4px;
+      }
+      .error {
+        background: #ffebee;
+        border-left-color: #f44336;
+      }
+      iframe {
+        width: 100%;
+        height: 720px;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        background: black;
+      }
+      .info {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        margin-top: 20px;
+      }
+      h1 {
+        color: #333;
+      }
+      h2 {
+        color: #666;
+        font-size: 18px;
+      }
+      code {
+        background: #f5f5f5;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-family: 'Courier New', monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>3D Render Template Manual Test</h1>
+
+      <div class="controls">
+        <h2>Test Controls</h2>
+        <button onclick="loadTemplate()">1. Load Template</button>
+        <button onclick="initScene()" id="initBtn" disabled>
+          2. Initialize Scene
+        </button>
+        <button onclick="seekTo(0)" id="seek0Btn" disabled>Seek to t=0</button>
+        <button onclick="seekTo(2)" id="seek2Btn" disabled>Seek to t=2</button>
+        <button onclick="seekTo(5)" id="seek5Btn" disabled>Seek to t=5</button>
+        <button onclick="seekTo(10)" id="seek10Btn" disabled>
+          Seek to t=10
+        </button>
+
+        <div class="status" id="status">
+          Ready to test. Click "Load Template" to begin.
+        </div>
+      </div>
+
+      <iframe id="templateFrame" src="about:blank"></iframe>
+
+      <div class="info">
+        <h2>Test Instructions</h2>
+        <ol>
+          <li>
+            Click <strong>"Load Template"</strong> to load the 3D render
+            template in the iframe
+          </li>
+          <li>Wait for Three.js and engine modules to load (check status)</li>
+          <li>
+            Click <strong>"Initialize Scene"</strong> to create a test scene
+            with a star and planet
+          </li>
+          <li>
+            Use the <strong>"Seek to t=X"</strong> buttons to render at
+            different times
+          </li>
+          <li>
+            Verify that:
+            <ul>
+              <li>The scene renders correctly</li>
+              <li>The camera orbits around the scene</li>
+              <li>
+                Seeking to the same time produces identical results
+                (deterministic)
+              </li>
+              <li>The canvas is accessible via <code>#renderCanvas</code></li>
+            </ul>
+          </li>
+        </ol>
+
+        <h2>Expected Results</h2>
+        <ul>
+          <li>You should see a black space background with stars</li>
+          <li>A yellow star in the center</li>
+          <li>A blue planet to the right</li>
+          <li>The camera should orbit around the scene as time progresses</li>
+          <li>Debug info should show in the top-left corner</li>
+        </ul>
+      </div>
+    </div>
+
+    <script>
+      let iframe;
+      let iframeWindow;
+
+      function updateStatus(message, isError = false) {
+        const status = document.getElementById('status');
+        status.textContent = message;
+        status.className = isError ? 'status error' : 'status';
+      }
+
+      function enableButtons() {
+        document.getElementById('initBtn').disabled = false;
+      }
+
+      function enableSeekButtons() {
+        document.getElementById('seek0Btn').disabled = false;
+        document.getElementById('seek2Btn').disabled = false;
+        document.getElementById('seek5Btn').disabled = false;
+        document.getElementById('seek10Btn').disabled = false;
+      }
+
+      function loadTemplate() {
+        updateStatus('Loading 3D render template...');
+
+        iframe = document.getElementById('templateFrame');
+        iframe.src = 'templates/render_template_3d.html';
+
+        iframe.onload = function () {
+          iframeWindow = iframe.contentWindow;
+
+          // Wait for Three.js to load
+          const checkInterval = setInterval(() => {
+            if (typeof iframeWindow.THREE !== 'undefined') {
+              clearInterval(checkInterval);
+              updateStatus(
+                `✓ Template loaded! Three.js r${iframeWindow.THREE.REVISION} ready. Click "Initialize Scene".`
+              );
+              enableButtons();
+            }
+          }, 100);
+
+          // Timeout after 10 seconds
+          setTimeout(() => {
+            if (typeof iframeWindow.THREE === 'undefined') {
+              clearInterval(checkInterval);
+              updateStatus('✗ Error: Three.js failed to load', true);
+            }
+          }, 10000);
+        };
+
+        iframe.onerror = function () {
+          updateStatus('✗ Error: Failed to load template', true);
+        };
+      }
+
+      function initScene() {
+        if (!iframeWindow) {
+          updateStatus('✗ Error: Template not loaded', true);
+          return;
+        }
+
+        updateStatus('Initializing scene...');
+
+        const dreamData = {
+          title: 'Test Dream',
+          style: 'ethereal',
+          environment: {
+            preset: 'space',
+            skybox: 'galaxy',
+            lighting: {
+              ambient: 0.4,
+              directional: {
+                intensity: 1.0,
+                position: [100, 100, 50],
+                color: '#ffffff',
+              },
+            },
+          },
+          structures: [
+            {
+              id: 's1',
+              type: 'star',
+              pos: [0, 0, 0],
+              scale: 1.0,
+              material: {
+                color: '#ffff00',
+              },
+            },
+            {
+              id: 's2',
+              type: 'planet',
+              pos: [30, 0, 0],
+              scale: 0.8,
+              material: {
+                color: '#4488ff',
+              },
+            },
+          ],
+          entities: [],
+          cinematography: {
+            durationSec: 10,
+            shots: [
+              {
+                type: 'orbital',
+                startTime: 0,
+                duration: 10,
+                target: [0, 0, 0],
+                distance: 100,
+                speed: 1.0,
+              },
+            ],
+          },
+        };
+
+        try {
+          iframeWindow.initWithDream(dreamData, 1280, 720);
+          updateStatus(
+            '✓ Scene initialized! Use "Seek" buttons to render at different times.'
+          );
+          enableSeekButtons();
+        } catch (error) {
+          updateStatus(`✗ Error initializing scene: ${error.message}`, true);
+          console.error(error);
+        }
+      }
+
+      function seekTo(time) {
+        if (!iframeWindow) {
+          updateStatus('✗ Error: Template not loaded', true);
+          return;
+        }
+
+        try {
+          iframeWindow.seek(time);
+          updateStatus(`✓ Rendered frame at t=${time}s`);
+        } catch (error) {
+          updateStatus(`✗ Error seeking to t=${time}: ${error.message}`, true);
+          console.error(error);
+        }
+      }
+    </script>
+  </body>
+</html>
